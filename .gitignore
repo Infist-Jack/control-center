@@ -1,0 +1,7 @@
+# 敏感信息不进仓库
+.env
+.env.*
+.private/
+*.pairing-link
+*secret*
+*token*
