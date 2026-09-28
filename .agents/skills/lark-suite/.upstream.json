@@ -1,0 +1,14 @@
+{
+  "source_index": "https://open.feishu.cn/lark-cli/skills/isolated/.well-known/agent-skills/index.json",
+  "archive_url": "https://open.feishu.cn/lark-cli/skills/isolated/.well-known/agent-skills/lark-suite.tar.gz",
+  "archive_digest": "sha256:f473572aa88486d144fe4ead4eac2a21177bc429e85158ab5057c20f362bba1e",
+  "skills": [
+    "lark-calendar",
+    "lark-doc",
+    "lark-drive",
+    "lark-im",
+    "lark-shared",
+    "lark-wiki"
+  ],
+  "content_sha256": "dafcf8e3bf0deec6babec7d670390dd882f8e78f17776abb52569a69debc0de3"
+}

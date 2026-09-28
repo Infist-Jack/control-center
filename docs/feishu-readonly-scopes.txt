@@ -1,9 +1,0 @@
-im:chat:read
-im:message:readonly
-im:message.p2p_msg:get_as_user
-im:message.group_msg:get_as_user
-im:message.reactions:read
-search:message
-docx:document:readonly
-wiki:node:retrieve
-search:docs:read

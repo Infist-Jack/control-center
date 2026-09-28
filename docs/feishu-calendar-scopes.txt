@@ -1,5 +1,0 @@
-calendar:calendar.event:read
-calendar:calendar.event:create
-calendar:calendar.event:update
-calendar:calendar.event:delete
-calendar:calendar.free_busy:read

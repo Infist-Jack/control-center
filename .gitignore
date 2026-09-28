@@ -5,3 +5,6 @@
 *.pairing-link
 *secret*
 *token*
+
+# 官方技能参考文件名中的 token 是资源路由术语，不是凭证。
+!.agents/skills/lark-suite/references/lark-shared/references/lark-wiki-token-routing.md
