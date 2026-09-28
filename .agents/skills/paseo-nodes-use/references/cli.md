@@ -9,8 +9,7 @@
 - `-d, --background` 后台运行
 - `--title <title>`、`--label <k=v>` 标题、标签
 - `--provider <p>` / `--model <m>` / `--thinking <id>` / `--mode <mode>`
-- `--cwd <path>` 节点上的工作目录
-- `--new-workspace <local|worktree>`，配合 `--worktree-mode <branch-off|checkout-branch|checkout-pr>`、`--new-branch`、`--base`、`--branch`、`--pr-number`
+- `--workspace <id>` 必填，在该 workspace 目录下运行（`node.sh` 禁止 `--new-workspace` / `--worktree*`）
 - `--env <k=v>` 环境变量
 - `--wait-timeout <duration>` 前台运行时的最长等待
 
@@ -30,4 +29,4 @@
 ## 节点信息
 
 - `provider ls`、`provider models <provider>`、`provider diagnostic <provider>`
-- `workspace ls`、`terminal ls --all`
+- `workspace ls`、`project ls`、`terminal ls --all`

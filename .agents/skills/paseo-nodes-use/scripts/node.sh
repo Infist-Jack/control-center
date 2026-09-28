@@ -54,6 +54,22 @@ else
   host_args=()
 fi
 
+# workspace 规范：执行必须指定已有 workspace，禁止新建 project/workspace
+[[ "$1" != -* ]] || die "paseo 子命令须放在参数最前"
+has_ws=false
+for a in "$@"; do [[ "$a" == --workspace || "$a" == --workspace=* ]] && has_ws=true; done
+sub="$1 ${2:-}"; [[ "$1" == agent ]] && sub="${2:-} ${3:-}"
+case "$sub" in
+  "run "*|"terminal create")
+    $has_ws || die "$sub 必须带 --workspace <id>，先用 workspace ls 选择已有 workspace"
+    for a in "$@"; do [[ "$a" == --new-workspace* || "$a" == --worktree* ]] && die "禁止新建 workspace（$a）"; done ;;
+  "workspace create"|"project create"|"clone "*|"worktree "*)
+    die "禁止新建 project/workspace（$sub）" ;;
+esac
+
+# 不继承调用方的 paseo agent 身份，避免任务挂到当前会话下
+unset PASEO_AGENT_ID PASEO_AGENT_CWD PASEO_WORKSPACE_ID PASEO_TERMINAL_ID
+
 echo "[node] $name $actual" >&2
 set +e
 paseo "${host_args[@]}" "$@" 2> >(redact >&2) | redact
