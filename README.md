@@ -2,6 +2,11 @@
 
 供 Claude Code 与 Codex 使用的 skills，仅在本仓库内生效：在仓库目录中启动 agent 即自动加载。
 
+用途是给 coding agent 赋能：
+
+- **Paseo 节点控制**：按名称定位已连接的节点，在其上启动、观察和管理 agent 任务。
+- **研发上下文连通**：打通飞书、Linear、GitHub 等上下文，读写文档、issue 与消息，并关联到研发任务。
+
 ## 目录设计
 
 ```
