@@ -1,6 +1,6 @@
 ---
 name: paseo-nodes-use
-description: 通过 Paseo 控制已连接的节点（机器）。当用户按机器名称或别名（如 Lenovo、mac-mini、入口服务器）要求查看节点、在某台机器上运行 agent 任务、查看或干预任务、或在节点上执行 shell 命令时使用。
+description: 通过 Paseo 控制已连接的节点（机器）。当用户按机器名称或别名（如 Lenovo、VM-SG:2c-2g、入口服务器）要求查看节点、在某台机器上运行 agent 任务、查看或干预任务、或在节点上执行 shell 命令时使用。
 ---
 
 # Paseo 节点控制
@@ -11,6 +11,7 @@ description: 通过 Paseo 控制已连接的节点（机器）。当用户按机
 scripts/node.sh list                                   # 列出节点
 scripts/node.sh <节点> <paseo 子命令...>                # 在节点上执行 paseo 子命令（子命令放最前）
 scripts/exec.sh <节点> --workspace <id> -- <命令>       # 在节点上执行 shell 命令
+scripts/node.sh <节点> sdk-upload -- <本地文件>          # 上传文件到节点，返回节点上的分段路径
 ```
 
 `<节点>` 为 name 或任一别名，忽略大小写。stderr 首行 `[node] <name> <serverId>` 即核对结果。
@@ -25,6 +26,7 @@ scripts/exec.sh <节点> --workspace <id> -- <命令>       # 在节点上执行
 | 4. 观察任务 | `ls -g --json`、`inspect <id> --json`、`logs <id> --tail <n>`、`wait <id> --timeout <秒>` |
 | 5. 干预任务 | `send <id> "<消息>"`、`stop <id>`、`permit ls`、`permit allow\|deny <id> [req_id]` |
 | 6. 执行 shell | `exec.sh <节点> --workspace <id> [--timeout 秒] -- <命令>`，返回命令输出和退出码 |
+| 7. 上传文件 | `node.sh <节点> sdk-upload [--timeout 秒] -- <本地文件>`，分段写入节点 Paseo `uploads/`；用完由调用方拼接校验并删除 |
 
 更多参数见 [references/cli.md](references/cli.md)。
 

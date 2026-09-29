@@ -46,7 +46,8 @@ if [[ -n "$link_file" ]]; then
   host_args=(--host "$link")
 else
   # 无配对链接则视为本机 daemon
-  actual=$(paseo status --json 2>/dev/null | jq -r '.serverId // empty')
+  local_status=$(paseo status --json 2>/dev/null)
+  actual=$(jq -r '.serverId // empty' <<<"$local_status")
   [[ "$actual" == "$expected" ]] || die "$name 没有配对链接，且本机 serverId（${actual:-未知}）与清单 $expected 不一致"
   if [[ -z "${PASEO_PASSWORD:-}" && -r "$PRIVATE/local.password" ]]; then
     PASEO_PASSWORD=$(<"$PRIVATE/local.password"); export PASEO_PASSWORD
@@ -60,7 +61,7 @@ has_ws=false
 for a in "$@"; do [[ "$a" == --workspace || "$a" == --workspace=* ]] && has_ws=true; done
 sub="$1 ${2:-}"; [[ "$1" == agent ]] && sub="${2:-} ${3:-}"
 case "$sub" in
-  "run "*|"terminal create")
+  "run "*|"terminal create"|"sdk-exec "*)
     $has_ws || die "$sub 必须带 --workspace <id>，先用 workspace ls 选择已有 workspace"
     for a in "$@"; do [[ "$a" == --new-workspace* || "$a" == --worktree* ]] && die "禁止新建 workspace（$a）"; done ;;
   "workspace create"|"project create"|"clone "*|"worktree "*)
@@ -72,5 +73,18 @@ unset PASEO_AGENT_ID PASEO_AGENT_CWD PASEO_WORKSPACE_ID PASEO_TERMINAL_ID
 
 echo "[node] $name $actual" >&2
 set +e
+if [[ "$1" == sdk-exec || "$1" == sdk-upload ]]; then
+  helper=terminal-exec.mjs; [[ "$1" == sdk-upload ]] && helper=upload.mjs
+  shift
+  export PASEO_NODE_EXPECTED_ID="$expected"
+  if [[ -n "$link_file" ]]; then
+    export PASEO_NODE_OFFER="$link"
+  else
+    export PASEO_NODE_ENDPOINT
+    PASEO_NODE_ENDPOINT=$(jq -r '.listen // empty' <<<"$local_status")
+  fi
+  node "$(dirname "$0")/$helper" "$@" 2> >(redact >&2) | redact
+  exit "${PIPESTATUS[0]}"
+fi
 paseo "${host_args[@]}" "$@" 2> >(redact >&2) | redact
 exit "${PIPESTATUS[0]}"
