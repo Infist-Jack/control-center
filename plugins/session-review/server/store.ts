@@ -4,6 +4,8 @@ import { join } from "node:path";
 import type { Preset, Summary } from "../shared/model.ts";
 import type { ExtractedSession } from "./sources/types.ts";
 
+/** Bump when parsing rules change so stale extracts are rebuilt even if the source file is unchanged. */
+export const EXTRACT_VERSION = 2;
 export const BUILTIN_PRESET_ID = "builtin-general";
 export const BUILTIN_PRESET_NAME = "通用复盘";
 export const BUILTIN_PRESET_BODY = [
@@ -39,14 +41,14 @@ export class Store {
 
   async readExtract(provider: string, id: string, mtimeMs: number, size: number): Promise<ExtractedSession | null> {
     try {
-      const raw = JSON.parse(await readFile(this.extractPath(provider, id), "utf8")) as { mtimeMs: number; size: number; session: ExtractedSession };
-      if (raw.mtimeMs === mtimeMs && raw.size === size) return raw.session;
+      const raw = JSON.parse(await readFile(this.extractPath(provider, id), "utf8")) as { version?: number; mtimeMs: number; size: number; session: ExtractedSession };
+      if (raw.version === EXTRACT_VERSION && raw.mtimeMs === mtimeMs && raw.size === size) return raw.session;
     } catch { /* miss */ }
     return null;
   }
 
   async writeExtract(session: ExtractedSession, mtimeMs: number, size: number): Promise<void> {
-    await this.writeAtomic(this.extractPath(session.provider, session.id), JSON.stringify({ mtimeMs, size, session }));
+    await this.writeAtomic(this.extractPath(session.provider, session.id), JSON.stringify({ version: EXTRACT_VERSION, mtimeMs, size, session }));
   }
 
   async readExtractAny(provider: string, id: string): Promise<ExtractedSession | null> {
