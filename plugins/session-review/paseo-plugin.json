@@ -1,5 +1,7 @@
 {
   "id": "session-review",
   "description": "按工作区和日期复盘这台机器上的 Claude / Codex 会话：时间线、决策点、并行图，可选用本机 runtime 归纳。",
-  "requirements": { "paseo": "^0.9.2" }
+  "requirements": {
+    "paseo": ">=0.9.2"
+  }
 }

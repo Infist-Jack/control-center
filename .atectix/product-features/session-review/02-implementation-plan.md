@@ -148,7 +148,7 @@ RPC 列表（30 秒限制下都用短请求）：
 3. **页面**：卡片、决策点、并行图、详情、归纳区骨架。`npm run typecheck`，安装时通过 Paseo 插件编译，在真实 Web 检查深浅主题与 390px。
 4. **归纳与预设**：三个 runtime 适配、输出 schema、缓存、预设 CRUD。用 claude 对 9/30 跑一次真实归纳，检查结构与二次运行的缓存命中；codex 跑一次对照；opencode 视安装情况。
 
-接入步骤：本机 daemon 在 `config.json` 打开 `pluginsEnabled`（或在设置页开启，支持热加载），`paseo plugin install "$PWD/plugins/session-review"`，改动后 `paseo plugin reload session-review`。
+接入步骤：本机 daemon 在 `config.json` 打开 `pluginsEnabled`，然后 `paseo daemon reload` 让 daemon 重新读配置（不重启、不打断会话；直接改文件不会自动生效），`paseo plugin install "$PWD/plugins/session-review"`，改动后 `paseo plugin reload session-review`。
 
 ## 接入前提与已知限制
 

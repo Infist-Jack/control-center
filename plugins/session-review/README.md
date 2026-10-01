@@ -10,7 +10,7 @@
 
 ```bash
 cd ~/control-center && npm ci && npm run typecheck --workspace=session-review
-# daemon 的 config.json 里 pluginsEnabled 需为 true（设置页也能开，支持热加载）
+# daemon 的 config.json 里 pluginsEnabled 需为 true；改完文件执行 paseo daemon reload（不重启、不打断会话）
 paseo plugin install "$PWD/plugins/session-review" --json
 ```
 
