@@ -95,7 +95,10 @@ export async function runReview(scope: Scope, deps: ReviewDeps, report: (p: Prog
   }
   report({ phase: "整理", done: selected.length, total: selected.length });
 
-  const filtered = scope.branch ? sessions.filter((s) => s.branch === scope.branch) : sessions;
+  // A resumed Claude session is written to a new file that starts with a copy of the old one;
+  // keep the longest copy and count the others as folded threads.
+  const deduped = foldResumedCopies(sessions, hiddenByParent);
+  const filtered = scope.branch ? deduped.filter((s) => s.branch === scope.branch) : deduped;
   const cards = toCards(filtered, catalog, hiddenByParent);
   const spans = cards.map((c) => c.spans);
   return {
@@ -112,6 +115,24 @@ export async function runReview(scope: Scope, deps: ReviewDeps, report: (p: Prog
     },
     sessions: cards,
   };
+}
+
+export function foldResumedCopies(sessions: ExtractedSession[], hiddenByParent: Map<string, string[]>): ExtractedSession[] {
+  // Only Claude Code copies history into a new file on resume; Codex forks are explicit (`forkedFrom`) and stay separate.
+  const groups = new Map<string, ExtractedSession[]>();
+  for (const s of sessions) {
+    const firstUser = s.messages.find((m) => m.role === "user");
+    const foldable = s.provider === "claude" && !s.forkedFrom && firstUser;
+    const key = foldable ? `${s.provider}|${s.cwd}|${firstUser.at}|${firstUser.text.slice(0, 200)}` : `${s.provider}|${s.id}`;
+    groups.set(key, [...(groups.get(key) ?? []), s]);
+  }
+  const out: ExtractedSession[] = [];
+  for (const group of groups.values()) {
+    const [keep, ...rest] = [...group].sort((a, b) => b.messages.length - a.messages.length || b.endedAt.localeCompare(a.endedAt));
+    if (rest.length) hiddenByParent.set(keep.id, [...(hiddenByParent.get(keep.id) ?? []), ...rest.map((r) => r.id)]);
+    out.push(keep);
+  }
+  return out;
 }
 
 export function toCards(sessions: ExtractedSession[], catalog: Catalog, hiddenByParent: Map<string, string[]>): SessionCard[] {

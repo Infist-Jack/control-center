@@ -103,6 +103,8 @@ export async function parseClaude(candidate: Candidate): Promise<ExtractedSessio
           if (tool?.name === CLAUDE_QUESTION_TOOL) {
             const target = decisions.find((d) => d.detail === toolUseId);
             if (target) { target.answer = parseClaudeAnswers(resultText) ?? clip(resultText, 200); target.detail = null; }
+            // The user's answer resumes the agent: the silence before it is waiting, not running.
+            starters.push({ at, real: true });
           } else if (block.is_error === true && resultText.trimStart().startsWith(CLAUDE_DENIED_PREFIX)) {
             const reason = resultText.match(/Reason:\s*(.+?)(?:\.\s|$)/);
             decisions.push({
@@ -177,21 +179,35 @@ export function titleOf(text: string): string {
   return clip(base, TITLE_MAX);
 }
 
-/** Runs start at each starter and end at the last activity before the next starter. */
-export function buildTurns(starters: Array<{ at: string; real: boolean }>, activity: string[], first: string | null, last: string | null): Turn[] {
+/** Longest silence inside one turn that still counts as the agent working. */
+export const RUN_GAP_MS = 15 * 60_000;
+
+/** Runs start at each starter and end at the last activity before the next starter; long silences split a run. */
+export function buildTurns(startersIn: Array<{ at: string; real: boolean }>, activity: string[], first: string | null, last: string | null): Turn[] {
+  const starters = [...startersIn].sort((a, b) => a.at.localeCompare(b.at));
   const sortedActivity = [...activity].sort();
   const turns: Turn[] = [];
   for (let i = 0; i < starters.length; i++) {
     const start = starters[i].at;
     const next = starters[i + 1] ?? null;
-    let end = start;
-    for (const t of sortedActivity) {
-      if (t < start) continue;
-      if (next && t >= next.at) break;
-      if (t > end) end = t;
+    // Activity that belongs to this turn, clustered by silence.
+    const own = sortedActivity.filter((t) => t >= start && (!next || t < next.at));
+    const clusters: Array<{ start: string; end: string }> = [{ start, end: start }];
+    for (const t of own) {
+      const current = clusters[clusters.length - 1];
+      if (Date.parse(t) - Date.parse(current.end) > RUN_GAP_MS) clusters.push({ start: t, end: t });
+      else if (t > current.end) current.end = t;
     }
-    if (!next && last && last > end) end = last;
-    turns.push({ startedAt: start, endedAt: end, waitsForUser: !!next && next.real, nextStartedAt: next ? next.at : null });
+    const lastCluster = clusters[clusters.length - 1];
+    if (!next && last && last > lastCluster.end && Date.parse(last) - Date.parse(lastCluster.end) <= RUN_GAP_MS) lastCluster.end = last;
+    clusters.forEach((cluster, index) => {
+      const isLast = index === clusters.length - 1;
+      turns.push({
+        startedAt: cluster.start, endedAt: cluster.end,
+        waitsForUser: isLast && !!next && next.real,
+        nextStartedAt: isLast && next ? next.at : null,
+      });
+    });
   }
   if (turns.length === 0 && first && last) turns.push({ startedAt: first, endedAt: last, waitsForUser: false, nextStartedAt: null });
   return turns;

@@ -29,8 +29,10 @@ test("claude: user messages, questions, denial, memory, interrupt, turns", async
   assert.equal(session.decisions[4].excerpt, "token=sk-abcdefghijklmnopqrstuvwxyz1234 不该出现。");
   const spans = spansFromTurns(session.turns);
   const waits = spans.filter((s) => s.kind === "wait");
-  assert.equal(waits.length, 1, "one wait: from the question until the user's next real message");
-  assert.equal(spans.filter((s) => s.kind === "run").length, 3, "three runs: first ask, after answer, after notification");
+  assert.equal(waits.length, 2, "waiting for the answer to the question, then after the interrupt");
+  assert.equal(waits[0].start, "2026-09-30T04:01:00.000Z");
+  assert.equal(waits[0].end, "2026-09-30T04:30:00.000Z");
+  assert.equal(spans.filter((s) => s.kind === "run").length, 4, "runs: ask, after answer, after reply, after notification");
   assert.ok(session.messages.some((m) => m.role === "system"), "task notification kept as a system message");
 });
 

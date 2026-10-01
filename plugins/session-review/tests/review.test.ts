@@ -80,3 +80,30 @@ test("wait segments longer than the cap are treated as parked, not waiting", asy
   ]);
   assert.equal(spans.filter((s) => s.kind === "wait").length, 1);
 });
+
+test("resumed copies of the same session are folded into the longest one", async () => {
+  const { foldResumedCopies } = await import("../server/review.ts");
+  const base = { provider: "claude" as const, file: "", cwd: "/w", branch: null, startedAt: "a", endedAt: "b", title: "t", turns: [], decisions: [], userMessages: 1, forkedFrom: null, hiddenThreads: [], error: null };
+  const short = { ...base, id: "s1", messages: [{ at: "2026-10-01T00:42:00.000Z", role: "user" as const, text: "同一句话" }] };
+  const long = { ...base, id: "s2", endedAt: "c", messages: [...short.messages, { at: "2026-10-01T10:00:00.000Z", role: "assistant" as const, text: "后续" }] };
+  const other = { ...base, id: "s3", messages: [{ at: "2026-10-01T00:42:00.000Z", role: "user" as const, text: "另一句话" }] };
+  const hidden = new Map<string, string[]>();
+  const out = foldResumedCopies([short, long, other], hidden);
+  assert.deepEqual(out.map((s) => s.id).sort(), ["s2", "s3"]);
+  assert.deepEqual(hidden.get("s2"), ["s1"]);
+});
+
+test("long silences inside a turn split the run", async () => {
+  const { buildTurns, RUN_GAP_MS } = await import("../server/sources/claude.ts");
+  const t0 = Date.parse("2026-10-01T02:39:00.000Z");
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const turns = buildTurns(
+    [{ at: iso(t0), real: true }, { at: iso(t0 + 8 * 3_600_000), real: true }],
+    [iso(t0 + 30_000), iso(t0 + 60_000), iso(t0 + 7 * 3_600_000), iso(t0 + 7 * 3_600_000 + 60_000)],
+    iso(t0), iso(t0 + 8 * 3_600_000 + 60_000),
+  );
+  assert.equal(turns.length, 3, "first turn splits into two runs around the silence, plus the second turn");
+  assert.equal(turns[0].waitsForUser, false);
+  assert.equal(turns[1].waitsForUser, true, "only the last cluster of a turn waits for the user");
+  assert.ok(Date.parse(turns[0].endedAt) - Date.parse(turns[0].startedAt) < RUN_GAP_MS);
+});
