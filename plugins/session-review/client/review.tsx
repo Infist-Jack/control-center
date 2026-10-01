@@ -27,23 +27,30 @@ const RANGE_OPTIONS = [
   { label: "今天", value: "today" }, { label: "昨天", value: "yesterday" }, { label: "最近 7 天", value: "last7" }, { label: "自定义", value: "custom" },
 ] as const;
 
+// Paseo remounts panels when the layout flips between compact and wide; keep the chosen scope across remounts.
+interface Remembered { pickedWorkspace: string | null; pickedProject: string | null; rangeKind: Range["kind"]; customFrom: string; customTo: string; branch: string | null }
+const remembered = new Map<string, Remembered>();
+
 export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
   const c = theme.colors;
   const catalogCall = useRpc(catalogRpc), startCall = useRpc(reviewStartRpc), statusCall = useRpc(reviewStatusRpc);
   const catalog = useQuery({ queryKey: ["session-review", "catalog", hostId], queryFn: () => catalogCall({}) });
 
-  const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(workspaceId);
-  const [pickedProject, setPickedProject] = useState<string | null>(null);
-  const [rangeKind, setRangeKind] = useState<Range["kind"]>("today");
-  const [customFrom, setCustomFrom] = useState(""), [customTo, setCustomTo] = useState("");
-  const [branch, setBranch] = useState<string | null>(null);
+  const memoryKey = `${hostId}:${workspaceId ?? "surface"}`;
+  const initial = remembered.get(memoryKey);
+  const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(initial?.pickedWorkspace ?? workspaceId);
+  const [pickedProject, setPickedProject] = useState<string | null>(initial?.pickedProject ?? null);
+  const [rangeKind, setRangeKind] = useState<Range["kind"]>(initial?.rangeKind ?? "today");
+  const [customFrom, setCustomFrom] = useState(initial?.customFrom ?? ""), [customTo, setCustomTo] = useState(initial?.customTo ?? "");
+  const [branch, setBranch] = useState<string | null>(initial?.branch ?? null);
+  useEffect(() => { remembered.set(memoryKey, { pickedWorkspace, pickedProject, rangeKind, customFrom, customTo, branch }); }, [memoryKey, pickedWorkspace, pickedProject, rangeKind, customFrom, customTo, branch]);
   const [jobId, setJobId] = useState<string | null>(null);
   const [selectedDecision, setSelectedDecision] = useState<string | null>(null);
   const [openSession, setOpenSession] = useState<SessionCard | null>(null);
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
 
-  useEffect(() => { setPickedWorkspace(workspaceId); }, [workspaceId]);
+  useEffect(() => { if (workspaceId !== null) setPickedWorkspace(workspaceId); }, [workspaceId]);
 
   const scope: Scope = useMemo(() => ({
     workspaceId: pickedWorkspace, projectId: pickedWorkspace ? null : pickedProject,
