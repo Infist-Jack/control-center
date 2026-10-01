@@ -1,6 +1,6 @@
 # Paseo 会话复盘：实现方案
 
-状态：2026-10-01 草案，待用户确认后开始实现。产品行为以已确认的 [PRD](01-prd.md) 为准。
+状态：2026-10-01 用户确认；2026-10-02 实现完成并安装到本机 daemon。实现中的偏差见文末。产品行为以已确认的 [PRD](01-prd.md) 为准。
 
 ## 整体实现
 
@@ -158,3 +158,9 @@ RPC 列表（30 秒限制下都用短请求）：
 - Codex 的记忆写入首版不判定；opencode 作为会话来源不在首版，只作为归纳 runtime。
 - 归纳会在 scratch 目录下产生新的 claude / codex 会话记录，抽取时按 cwd 排除。
 - 时间按 daemon 进程的时区；跨时区使用时以节点时间为准。
+
+## 实现偏差记录（2026-10-02）
+
+- 项目与工作区目录没有走 Paseo SDK，而是和 agents 一样直接读 daemon home 下的 `projects/projects.json`、`projects/workspaces.json`。原因：三份数据同源同机，形状已知，省掉一处 SDK 形状依赖。
+- 归纳 runtime 的 claude 调用加了 `--no-session-persistence`，不再产生会话记录；scratch 目录排除规则仍保留作为兜底。
+- 开发机的 lockfile 指向腾讯云内网镜像，本机安装时临时改写 URL 再还原，提交的 lockfile 只新增了 session-review 工作区条目。
