@@ -72,7 +72,7 @@ export async function parseClaude(candidate: Candidate): Promise<ExtractedSessio
     const at = typeof record.timestamp === "string" ? record.timestamp : null;
     if (!at) continue;
     if (!first || at < first) first = at; if (!last || at > last) last = at;
-    if (typeof record.gitBranch === "string" && record.gitBranch) branch = record.gitBranch;
+    if (typeof record.gitBranch === "string" && record.gitBranch && record.gitBranch !== "HEAD") branch = record.gitBranch;
     if (typeof record.cwd === "string" && record.cwd) cwd = record.cwd;
     const message = (record.message ?? {}) as Record<string, unknown>;
     const content = message.content;

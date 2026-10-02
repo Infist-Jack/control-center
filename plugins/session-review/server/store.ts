@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ExtractedSession } from "./sources/types.ts";
 
 /** Bump when parsing rules change so stale extracts are rebuilt even if the source file is unchanged. */
-export const EXTRACT_VERSION = 3;
+export const EXTRACT_VERSION = 4;
 
 export class Store {
   readonly dataDir: string;
