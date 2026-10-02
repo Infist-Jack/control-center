@@ -7,6 +7,7 @@
 - **Paseo 节点控制**：按名称定位已连接的节点，在其上启动、观察和管理 agent 任务。
 - **节点全局 skills 管理**：`nodes-skills-manage` 统一盘点和分发公共 skills，保留节点专属技能，支持目录迁移、链接检查和变更预览。
 - **Paseo 公共 Skills 界面**：[独立插件](plugins/nodes-skills-manage/README.md) 提供节点状态、仓库更新差异、快照更新和确认分发，与 agent 共用管理入口。
+- **Paseo 会话复盘**：[复盘插件](plugins/session-review/README.md) 从中控汇总全部登记节点的 Claude / Codex 会话，查看时间线、决策点与消息详情。
 - **研发上下文连通**：打通飞书、Linear、GitHub 等上下文，读写文档、issue 与消息，并关联到研发任务。
 
 ## 目录设计

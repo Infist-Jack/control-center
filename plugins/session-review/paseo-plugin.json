@@ -1,0 +1,7 @@
+{
+  "id": "session-review",
+  "description": "从中控复盘全部登记节点的 Claude / Codex 会话：按节点、项目和日期查看时间线、决策点与消息。",
+  "requirements": {
+    "paseo": ">=0.9.2"
+  }
+}
