@@ -24,11 +24,17 @@ export const sessionCardSchema = z.object({
   id: z.string(),
   provider: providerSchema,
   title: z.string(),
+  /** First and last activity inside the selected range. */
   startedAt: z.string(),
   endedAt: z.string(),
+  /** Bounds of the whole session, which may start before or end after the range. */
+  sessionStartedAt: z.string(),
+  sessionEndedAt: z.string(),
+  continued: z.boolean(),
   activeMs: z.number(),
   waitMs: z.number(),
   userMessages: z.number(),
+  userMessagesTotal: z.number(),
   agentId: z.string().nullable(),
   projectId: z.string().nullable(),
   branch: z.string().nullable(),

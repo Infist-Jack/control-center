@@ -1,4 +1,4 @@
-import type { Decision, Progress, ReviewResult, Scope, SessionCard, SessionDetail } from "../shared/model.ts";
+import type { Decision, Progress, ReviewResult, Scope, SessionCard, SessionDetail, Span } from "../shared/model.ts";
 import { EXCERPT_MAX, MESSAGE_MAX, SESSION_LIMIT, TITLE_MAX } from "../shared/model.ts";
 import { attribute, inScope, loadCatalog, type Catalog } from "./catalog.ts";
 import { clip } from "./decisions.ts";
@@ -98,8 +98,10 @@ export async function runReview(scope: Scope, deps: ReviewDeps, report: (p: Prog
   // A resumed Claude session is written to a new file that starts with a copy of the old one;
   // keep the longest copy and count the others as folded threads.
   const deduped = foldResumedCopies(sessions, hiddenByParent);
-  const filtered = scope.branch ? deduped.filter((s) => s.branch === scope.branch) : deduped;
-  const cards = toCards(filtered, catalog, hiddenByParent);
+  // A session belongs to the range if any of its activity falls inside it; the chart then shows only that part.
+  const active = deduped.filter((s) => Date.parse(s.endedAt) >= resolved.from.getTime() && Date.parse(s.startedAt) <= resolved.to.getTime());
+  const filtered = scope.branch ? active.filter((s) => s.branch === scope.branch) : active;
+  const cards = toCards(filtered, catalog, hiddenByParent, resolved.from, resolved.to);
   const spans = cards.map((c) => c.spans);
   return {
     scope, from: resolved.fromKey, to: resolved.toKey,
@@ -135,19 +137,38 @@ export function foldResumedCopies(sessions: ExtractedSession[], hiddenByParent: 
   return out;
 }
 
-export function toCards(sessions: ExtractedSession[], catalog: Catalog, hiddenByParent: Map<string, string[]>): SessionCard[] {
+export function clipSpans(spans: Span[], from: Date, to: Date): Span[] {
+  const lo = from.getTime(), hi = to.getTime();
+  const out: Span[] = [];
+  for (const span of spans) {
+    const start = Math.max(Date.parse(span.start), lo);
+    const end = Math.min(Date.parse(span.end), hi);
+    if (end > start) out.push({ kind: span.kind, start: new Date(start).toISOString(), end: new Date(end).toISOString() });
+  }
+  return out;
+}
+
+export function toCards(sessions: ExtractedSession[], catalog: Catalog, hiddenByParent: Map<string, string[]>, from: Date, to: Date): SessionCard[] {
   const byId = new Map(sessions.map((s) => [s.id, s]));
   const cards = new Map<string, SessionCard>();
+  const inRange = (at: string) => { const t = Date.parse(at); return t >= from.getTime() && t <= to.getTime(); };
   for (const s of sessions) {
     const a = attribute(catalog, s.id, s.cwd);
-    const spans = spansFromTurns(s.turns);
+    const spans = clipSpans(spansFromTurns(s.turns), from, to);
+    const messagesInRange = s.messages.filter((m) => inRange(m.at));
+    const times = [...spans.flatMap((sp) => [sp.start, sp.end]), ...messagesInRange.map((m) => m.at)].sort();
+    const clampedStart = new Date(Math.max(Date.parse(s.startedAt), from.getTime())).toISOString();
+    const clampedEnd = new Date(Math.min(Date.parse(s.endedAt), to.getTime())).toISOString();
     cards.set(s.id, {
-      id: s.id, provider: s.provider, title: clip(s.title, TITLE_MAX) || "（无标题）", startedAt: s.startedAt, endedAt: s.endedAt,
-      activeMs: sumMs(spans, "run"), waitMs: sumMs(spans, "wait"), userMessages: s.userMessages,
+      id: s.id, provider: s.provider, title: clip(s.title, TITLE_MAX) || "（无标题）",
+      startedAt: times[0] ?? clampedStart, endedAt: times[times.length - 1] ?? clampedEnd,
+      sessionStartedAt: s.startedAt, sessionEndedAt: s.endedAt, continued: Date.parse(s.startedAt) < from.getTime(),
+      activeMs: sumMs(spans, "run"), waitMs: sumMs(spans, "wait"),
+      userMessages: messagesInRange.filter((m) => m.role === "user").length, userMessagesTotal: s.userMessages,
       agentId: a.agentId, projectId: a.projectId,
       branch: s.branch, cwd: s.cwd, forkedFrom: s.forkedFrom, depth: 0,
       hiddenThreads: (hiddenByParent.get(s.id) ?? []).length,
-      spans, decisions: s.decisions.map(shortenDecision), error: s.error, file: s.file,
+      spans, decisions: s.decisions.filter((d) => inRange(d.at)).map(shortenDecision), error: s.error, file: s.file,
     });
   }
   // Order: by start time; a fork whose parent is in scope sits right under the parent with depth 1.

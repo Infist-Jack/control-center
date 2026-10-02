@@ -48,13 +48,17 @@ export function Gantt({ sessions, theme, compact, selectedDecision, onPickDecisi
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <Pill label={PROVIDER_LABELS[s.provider] ?? s.provider} theme={theme} tone="accent" />
         {s.depth > 0 && <Pill label="分叉" theme={theme} />}
+        {s.continued && <Pill label="续" theme={theme} />}
         {s.error && <Pill label="无法解析" theme={theme} tone="danger" />}
         {s.branch && <Pill label={s.branch} theme={theme} />}
         {s.hiddenThreads > 0 && <Muted theme={theme}>已折叠 {s.hiddenThreads} 个续写或子线程</Muted>}
       </View>
       <Text style={{ color: c.foreground, fontSize: 14, fontWeight: "600" }}>{s.title}</Text>
       <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>
-        {fmtDate(s.startedAt)} {fmtTime(s.startedAt)}–{fmtTime(s.endedAt)} · 活跃 {fmtDuration(s.activeMs)} · 等你 {fmtDuration(s.waitMs)} · 你发了 {s.userMessages} 条
+        本范围内 {fmtDate(s.startedAt)} {fmtTime(s.startedAt)}–{fmtTime(s.endedAt)} · 活跃 {fmtDuration(s.activeMs)} · 等你 {fmtDuration(s.waitMs)} · 你发了 {s.userMessages} 条
+      </Text>
+      <Text style={{ color: c.foregroundMuted, fontSize: 12 }}>
+        整个会话 {fmtDate(s.sessionStartedAt)} {fmtTime(s.sessionStartedAt)} 开始，{fmtDate(s.sessionEndedAt)} {fmtTime(s.sessionEndedAt)} 最后活动，共 {s.userMessagesTotal} 条
       </Text>
       {s.error ? <Text style={{ color: c.statusDanger, fontSize: 12 }}>{s.error}</Text> : null}
       {s.decisions.filter((d) => d.kind !== "memory-index").length > 0 ? (
@@ -74,7 +78,7 @@ export function Gantt({ sessions, theme, compact, selectedDecision, onPickDecisi
         {sessions.map((s) => (
           <View key={s.id}>
             <Pressable accessibilityRole="button" onPress={() => toggle(s.id)} style={{ flexDirection: "row", gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: c.border }}>
-              <Text numberOfLines={1} style={{ color: s.error ? c.statusDanger : c.foreground, fontSize: 12, flex: 2 }}>{s.depth ? "↳ " : ""}{s.title}</Text>
+              <Text numberOfLines={1} style={{ color: s.error ? c.statusDanger : c.foreground, fontSize: 12, flex: 2 }}>{s.depth ? "↳ " : ""}{s.continued ? "续 · " : ""}{s.title}</Text>
               <Text style={{ color: c.foregroundMuted, fontSize: 12, flex: 1 }}>{fmtTime(s.startedAt)}–{fmtTime(s.endedAt)}</Text>
               <Text style={{ color: c.foregroundMuted, fontSize: 12, width: 52, textAlign: "right" }}>{fmtDuration(s.activeMs)}</Text>
               <Text style={{ color: c.foregroundMuted, fontSize: 12, width: 56, textAlign: "right" }}>等{fmtDuration(s.waitMs)}</Text>
@@ -120,7 +124,7 @@ export function Gantt({ sessions, theme, compact, selectedDecision, onPickDecisi
           <Pressable accessibilityRole="button" accessibilityLabel={`展开 ${s.title}`} onPress={() => toggle(s.id)} style={{ flexDirection: "row", alignItems: "center", height: ROW_HEIGHT, backgroundColor: expanded === s.id ? c.surface1 : "transparent", borderRadius: 4 }}>
             <View style={{ width: LABEL_WIDTH, paddingRight: 8, paddingLeft: s.depth ? 12 : 2, flexDirection: "row", gap: 6, alignItems: "center" }}>
               <Text style={{ color: c.foregroundMuted, fontSize: 11, width: 36 }}>{fmtTime(s.startedAt)}</Text>
-              <Text numberOfLines={1} style={{ color: s.error ? c.statusDanger : c.foreground, fontSize: 11, flex: 1 }}>{s.depth ? "↳ " : ""}{s.title}</Text>
+              <Text numberOfLines={1} style={{ color: s.error ? c.statusDanger : c.foreground, fontSize: 11, flex: 1 }}>{s.depth ? "↳ " : ""}{s.continued ? "续 · " : ""}{s.title}</Text>
             </View>
             <View style={{ flex: 1, height: ROW_HEIGHT - 8, backgroundColor: c.surface1, borderRadius: 4 }}>
               {width > 0 && ticks.map((t) => (

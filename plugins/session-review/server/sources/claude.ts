@@ -37,7 +37,9 @@ export async function scanClaude(claudeHome: string, from: Date, to: Date): Prom
       const first = head.find((r) => typeof r.timestamp === "string" && typeof r.cwd === "string" && (r.type === "user" || r.type === "assistant"));
       if (!first) continue;
       const startedAt = new Date(String(first.timestamp));
-      if (startedAt < from || startedAt > to) continue;
+      // mtime >= from already guarantees the file was touched inside the range; sessions that
+      // started earlier are kept and clipped later, sessions that start after the range are dropped.
+      if (Number.isNaN(startedAt.getTime()) || startedAt > to) continue;
       out.push({
         provider: "claude", file, id: String(first.sessionId ?? entry.replace(/\.jsonl$/, "")), cwd: String(first.cwd),
         startedAt: startedAt.toISOString(), mtimeMs: info.mtimeMs, size: info.size, hiddenChildOf: null, forkedFrom: null,

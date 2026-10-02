@@ -112,3 +112,37 @@ test("long silences inside a turn split the run", async () => {
   assert.equal(turns[1].waitsForUser, true, "only the last cluster of a turn waits for the user");
   assert.ok(Date.parse(turns[0].endedAt) - Date.parse(turns[0].startedAt) < RUN_GAP_MS);
 });
+
+test("a session is shown on every day it was active, clipped to that day", async () => {
+  const { toCards } = await import("../server/review.ts");
+  const { loadCatalog } = await import("../server/catalog.ts");
+  const { h } = await deps();
+  const catalog = await loadCatalog(h.paseoHome);
+  const session = {
+    id: "long", provider: "claude" as const, file: "", cwd: "/w", branch: null,
+    startedAt: "2026-09-29T15:00:00.000Z", endedAt: "2026-09-30T04:30:00.000Z", title: "跨天会话",
+    messages: [
+      { at: "2026-09-29T15:00:00.000Z", role: "user" as const, text: "开始" },
+      { at: "2026-09-30T04:00:00.000Z", role: "user" as const, text: "第二天继续" },
+    ],
+    turns: [
+      { startedAt: "2026-09-29T15:00:00.000Z", endedAt: "2026-09-29T15:20:00.000Z", waitsForUser: true, nextStartedAt: "2026-09-30T04:00:00.000Z" },
+      { startedAt: "2026-09-30T04:00:00.000Z", endedAt: "2026-09-30T04:30:00.000Z", waitsForUser: false, nextStartedAt: null },
+    ],
+    decisions: [
+      { id: "d1", at: "2026-09-29T15:10:00.000Z", kind: "memory" as const, excerpt: "第一天", answer: null, next: null, detail: null },
+      { id: "d2", at: "2026-09-30T04:10:00.000Z", kind: "memory" as const, excerpt: "第二天", answer: null, next: null, detail: null },
+    ],
+    userMessages: 2, forkedFrom: null, hiddenThreads: [], error: null,
+  };
+  // Local day 2026-09-30 in UTC+8 is 2026-09-29T16:00Z .. 2026-09-30T15:59:59Z
+  const from = new Date("2026-09-29T16:00:00.000Z"), to = new Date("2026-09-30T15:59:59.999Z");
+  const [card] = toCards([session], catalog, new Map(), from, to);
+  assert.equal(card.continued, true);
+  assert.equal(card.startedAt, "2026-09-30T04:00:00.000Z", "row starts at the first activity inside the day");
+  assert.equal(card.userMessages, 1);
+  assert.equal(card.userMessagesTotal, 2);
+  assert.deepEqual(card.decisions.map((d) => d.id), ["d2"]);
+  assert.equal(card.spans.filter((s) => s.kind === "run").length, 1, "only the second day's run survives");
+  assert.equal(card.activeMs, 30 * 60_000);
+});

@@ -27,7 +27,7 @@ async function candidateFromFile(file: string, from: Date, to: Date): Promise<Ca
   if (!meta) return null;
   const payload = (meta.payload ?? {}) as Record<string, unknown>;
   const startedAt = new Date(String(payload.timestamp ?? meta.timestamp ?? ""));
-  if (Number.isNaN(startedAt.getTime()) || startedAt < from || startedAt > to) return null;
+  if (Number.isNaN(startedAt.getTime()) || startedAt > to) return null;
   return {
     provider: "codex", file, id: String(payload.id ?? ""), cwd: String(payload.cwd ?? ""),
     startedAt: startedAt.toISOString(), mtimeMs: info.mtimeMs, size: info.size,
@@ -36,9 +36,13 @@ async function candidateFromFile(file: string, from: Date, to: Date): Promise<Ca
   };
 }
 
+/** Codex files live in the directory of the day they started; a thread resumed later keeps appending there. */
+const LOOKBACK_DAYS = 30;
+
 export async function scanCodex(codexHome: string, from: Date, to: Date): Promise<Candidate[]> {
   const out: Candidate[] = [];
-  for (const key of dayKeys(from, to)) {
+  const lookbackStart = new Date(from); lookbackStart.setDate(lookbackStart.getDate() - LOOKBACK_DAYS);
+  for (const key of dayKeys(lookbackStart, to)) {
     const dir = join(codexHome, "sessions", key);
     let entries: string[] = [];
     try { entries = await readdir(dir); } catch { continue; }
@@ -51,7 +55,7 @@ export async function scanCodex(codexHome: string, from: Date, to: Date): Promis
   const archived = join(codexHome, "archived_sessions");
   let archivedEntries: string[] = [];
   try { archivedEntries = await readdir(archived); } catch { archivedEntries = []; }
-  const wanted = new Set(dayKeys(from, to).map((k) => k.replaceAll("/", "-")));
+  const wanted = new Set(dayKeys(lookbackStart, to).map((k) => k.replaceAll("/", "-")));
   for (const entry of archivedEntries) {
     const match = entry.match(/^rollout-(\d{4}-\d{2}-\d{2})T/);
     if (!match || !wanted.has(match[1]) || !entry.endsWith(".jsonl")) continue;
