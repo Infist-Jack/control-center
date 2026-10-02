@@ -90,10 +90,15 @@ export function Gantt({ sessions, theme, compact, selectedDecision, onPickDecisi
   const span = domain.end - domain.start;
   const x = (iso: string | number) => ((typeof iso === "number" ? iso : Date.parse(iso)) - domain.start) / span * width;
   const step = tickStepHours(span / HOUR, width);
+  // Ticks are anchored to local midnight so they land on 00:00, 06:00, 12:00 … regardless of when the first session started.
+  const dayStart = new Date(domain.start); dayStart.setHours(0, 0, 0, 0);
   const ticks: number[] = [];
-  for (let t = domain.start; t <= domain.end; t += step * HOUR) ticks.push(t);
-  const midnights = ticks.filter((t) => new Date(t).getHours() === 0);
+  for (let t = dayStart.getTime(); t <= domain.end; t += step * HOUR) if (t >= domain.start) ticks.push(t);
+  const midnights: number[] = [];
+  for (const d = new Date(dayStart); d.getTime() <= domain.end; d.setDate(d.getDate() + 1)) if (d.getTime() >= domain.start) midnights.push(d.getTime());
   const multiDay = fmtDate(domain.start) !== fmtDate(domain.end - 1);
+  const showHours = step < 24;
+  const dateLabels = multiDay ? (midnights[0] === domain.start ? midnights : [domain.start, ...midnights]) : [];
 
   return (
     <View style={{ gap: 2 }}>
@@ -102,11 +107,11 @@ export function Gantt({ sessions, theme, compact, selectedDecision, onPickDecisi
           <Text style={{ color: c.foregroundMuted, fontSize: 11 }}>{multiDay ? `${fmtDate(domain.start)} 至 ${fmtDate(domain.end - 1)}` : fmtDate(domain.start)}</Text>
         </View>
         <View style={{ flex: 1, height: 30 }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-          {width > 0 && multiDay && midnights.map((t) => (
-            <Text key={`d${t}`} style={{ position: "absolute", left: x(t), top: 0, color: c.foreground, fontSize: 10, fontWeight: "600" }}>{fmtDate(t)}</Text>
+          {width > 0 && dateLabels.map((t) => (
+            <Text key={`d${t}`} style={{ position: "absolute", left: x(t) + 2, top: 0, color: c.foreground, fontSize: 10, fontWeight: "600" }}>{fmtDate(t)}</Text>
           ))}
-          {width > 0 && ticks.map((t) => (
-            <Text key={t} style={{ position: "absolute", left: x(t), top: 15, color: c.foregroundMuted, fontSize: 10 }}>{fmtTime(new Date(t).toISOString())}</Text>
+          {width > 0 && showHours && ticks.map((t) => (
+            <Text key={t} style={{ position: "absolute", left: x(t) + 2, top: multiDay ? 15 : 8, color: c.foregroundMuted, fontSize: 10 }}>{fmtTime(new Date(t).toISOString())}</Text>
           ))}
         </View>
       </View>
@@ -119,7 +124,10 @@ export function Gantt({ sessions, theme, compact, selectedDecision, onPickDecisi
             </View>
             <View style={{ flex: 1, height: ROW_HEIGHT - 8, backgroundColor: c.surface1, borderRadius: 4 }}>
               {width > 0 && ticks.map((t) => (
-                <View key={`tick-${t}`} style={{ position: "absolute", left: x(t), top: 0, bottom: 0, width: 1, backgroundColor: new Date(t).getHours() === 0 ? c.foregroundMuted : c.border }} />
+                <View key={`tick-${t}`} style={{ position: "absolute", left: x(t), top: 0, bottom: 0, width: 1, backgroundColor: c.border }} />
+              ))}
+              {width > 0 && midnights.map((t) => (
+                <View key={`mid-${t}`} style={{ position: "absolute", left: x(t), top: -2, bottom: -2, width: 1, backgroundColor: c.foregroundMuted }} />
               ))}
               {width > 0 && s.spans.map((sp, i) => {
                 const left = x(sp.start);
