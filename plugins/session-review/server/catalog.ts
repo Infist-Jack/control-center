@@ -52,18 +52,16 @@ export async function loadCatalog(paseoHome: string): Promise<Catalog> {
   return { projects, workspaces, agents };
 }
 
-export interface Attribution { agentId: string | null; workspaceId: string | null; projectId: string | null; unmanaged: boolean }
+export interface Attribution { agentId: string | null; projectId: string | null }
 
+/** A Paseo agent record wins; otherwise the session belongs to the project whose root contains its cwd. */
 export function attribute(catalog: Catalog, sessionId: string, cwd: string): Attribution {
   const link = catalog.agents.get(sessionId);
   if (link) {
     const workspace = link.workspaceId ? catalog.workspaces.find((w) => w.id === link.workspaceId) : undefined;
-    return { agentId: link.agentId, workspaceId: link.workspaceId, projectId: workspace?.projectId ?? projectFor(catalog, cwd), unmanaged: false };
+    return { agentId: link.agentId, projectId: workspace?.projectId ?? projectFor(catalog, cwd) };
   }
-  const ordered = [...catalog.workspaces].sort((a, b) => Number(a.archived) - Number(b.archived) || b.cwd.length - a.cwd.length);
-  const workspace = ordered.find((w) => isUnder(cwd, w.cwd));
-  if (workspace) return { agentId: null, workspaceId: workspace.id, projectId: workspace.projectId, unmanaged: true };
-  return { agentId: null, workspaceId: null, projectId: projectFor(catalog, cwd), unmanaged: true };
+  return { agentId: null, projectId: projectFor(catalog, cwd) };
 }
 
 function projectFor(catalog: Catalog, cwd: string): string | null {
@@ -71,12 +69,6 @@ function projectFor(catalog: Catalog, cwd: string): string | null {
   return ordered.find((p) => isUnder(cwd, p.rootPath))?.id ?? null;
 }
 
-export function inScope(catalog: Catalog, attribution: Attribution, cwd: string, scope: { workspaceId?: string | null; projectId?: string | null }): boolean {
-  if (scope.workspaceId) {
-    if (attribution.workspaceId === scope.workspaceId) return true;
-    const workspace = catalog.workspaces.find((w) => w.id === scope.workspaceId);
-    return !!workspace && attribution.projectId === workspace.projectId && isUnder(cwd, workspace.cwd);
-  }
-  if (scope.projectId) return attribution.projectId === scope.projectId;
-  return true;
+export function inScope(attribution: Attribution, scope: { projectId?: string | null }): boolean {
+  return !scope.projectId || attribution.projectId === scope.projectId;
 }

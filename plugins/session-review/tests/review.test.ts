@@ -17,14 +17,15 @@ async function deps() {
 
 test("review: attribution, fork nesting, hidden threads, overview", async () => {
   const { deps: d } = await deps();
-  const result = await runReview({ workspaceId: "wks_1", range: { kind: "today" } }, d, () => {});
+  const result = await runReview({ projectId: "prj_1", range: { kind: "today" } }, d, () => {});
   assert.equal(result.from, "2026-09-30");
   assert.equal(result.sessions.length, 3, "claude session + codex parent + codex fork; hidden child folded");
   const claude = result.sessions.find((s) => s.provider === "claude")!;
-  assert.equal(claude.unmanaged, false);
   assert.equal(claude.agentId, "agent-1");
+  assert.equal(claude.projectId, "prj_1");
   const parent = result.sessions.find((s) => s.id === "x1")!;
-  assert.equal(parent.unmanaged, true, "no Paseo agent record");
+  assert.equal(parent.agentId, null, "no Paseo agent record");
+  assert.equal(parent.projectId, "prj_1", "attributed by project root");
   assert.equal(parent.hiddenThreads, 1);
   const fork = result.sessions.find((s) => s.id === "x3")!;
   assert.equal(fork.depth, 1);
@@ -38,6 +39,10 @@ test("review: scope by project and by branch; cache reuse", async () => {
   const { deps: d } = await deps();
   const byProject = await runReview({ projectId: "prj_1", range: { kind: "today" } }, d, () => {});
   assert.equal(byProject.sessions.length, 3);
+  const other = await runReview({ projectId: "prj_other", range: { kind: "today" } }, d, () => {});
+  assert.equal(other.sessions.length, 0);
+  const all = await runReview({ range: { kind: "today" } }, d, () => {});
+  assert.equal(all.sessions.length, 3);
   const byBranch = await runReview({ projectId: "prj_1", range: { kind: "today" }, branch: "feat/demo" }, d, () => {});
   assert.equal(byBranch.sessions.length, 1);
   const cached = await d.store.readExtractAny("claude", "c1");
@@ -48,7 +53,7 @@ test("review: scope by project and by branch; cache reuse", async () => {
 
 test("redaction happens before caching", async () => {
   const { deps: d } = await deps();
-  await runReview({ workspaceId: "wks_1", range: { kind: "today" } }, d, () => {});
+  await runReview({ projectId: "prj_1", range: { kind: "today" } }, d, () => {});
   const cached = await d.store.readExtractAny("claude", "c1");
   const text = JSON.stringify(cached);
   assert.ok(!text.includes("sk-abcdefghijklmnopqrstuvwxyz1234"), "api key masked");

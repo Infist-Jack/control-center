@@ -164,3 +164,12 @@ RPC 列表（30 秒限制下都用短请求）：
 - 项目与工作区目录没有走 Paseo SDK，而是和 agents 一样直接读 daemon home 下的 `projects/projects.json`、`projects/workspaces.json`。原因：三份数据同源同机，形状已知，省掉一处 SDK 形状依赖。
 - 归纳 runtime 的 claude 调用加了 `--no-session-persistence`，不再产生会话记录；scratch 目录排除规则仍保留作为兜底。
 - 开发机的 lockfile 指向腾讯云内网镜像，本机安装时临时改写 URL 再还原，提交的 lockfile 只新增了 session-review 工作区条目。
+
+## 第一轮反馈后的改动（2026-10-02）
+
+- 范围只按项目：`scope` 去掉 `workspaceId`；面板通过 catalog 的 workspace→project 映射取项目；归属只看 Paseo agent 记录和项目根目录。
+- 并行图成为唯一的会话列表：行可展开，展开内容即原会话卡加该会话的决策点和「查看消息」；轴头带日期，跨天在零点标日期，刻度按宽度自适应。
+- 去掉「未纳管」标签和 `unmanaged` 字段；`agentId` 为空即表示不是 Paseo 起的。
+- 删除归纳层：`server/summarize/`、预设存储、runtime 探测及对应 RPC 与页面；数据目录只剩 `extracts/`。
+- 抽取缓存加版本号（`EXTRACT_VERSION`），解析规则变化时自动重建。
+- Claude 续写副本按「首条用户消息时间 + 文本」折叠；运行段在轮内按 15 分钟静默切开；超过 90 分钟的等待视为搁置不画。

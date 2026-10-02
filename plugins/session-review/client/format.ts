@@ -4,6 +4,12 @@ export function fmtTime(iso: string): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+export function fmtDate(iso: string | number): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function fmtDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "0分";
   const minutes = Math.round(ms / 60_000);
@@ -13,16 +19,7 @@ export function fmtDuration(ms: number): string {
   return m ? `${h}时${m}分` : `${h}时`;
 }
 
-export function fmtDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.getMonth() + 1}/${d.getDate()} ${fmtTime(iso)}`;
-}
-
 export const KIND_LABELS: Record<string, string> = {
   question: "提问", interrupt: "打断", denied: "拒绝", memory: "记忆", "memory-index": "记忆索引",
-};
-export const OUTCOME_LABELS: Record<string, string> = {
-  delivered: "交付", abandoned: "废弃", overturned: "被推翻", unfinished: "未完成",
 };
 export const PROVIDER_LABELS: Record<string, string> = { claude: "Claude", codex: "Codex" };

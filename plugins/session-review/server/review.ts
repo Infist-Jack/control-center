@@ -39,7 +39,7 @@ export function resolveRange(range: Scope["range"], now = new Date()): { from: D
 }
 
 export function scopeKey(scope: Scope, resolved: { fromKey: string; toKey: string }): string {
-  return JSON.stringify([scope.workspaceId ?? null, scope.projectId ?? null, resolved.fromKey, resolved.toKey, scope.branch ?? null]);
+  return JSON.stringify([scope.projectId ?? null, resolved.fromKey, resolved.toKey, scope.branch ?? null]);
 }
 
 /** Parse or reuse the cached extraction for one candidate. Never throws; parse failures become `error`. */
@@ -84,7 +84,7 @@ export async function runReview(scope: Scope, deps: ReviewDeps, report: (p: Prog
   }
 
   // Attribution happens before parsing so out-of-scope files are never read in full.
-  const selected = candidates.filter((c) => inScope(catalog, attribute(catalog, c.id, c.cwd), c.cwd, scope));
+  const selected = candidates.filter((c) => inScope(attribute(catalog, c.id, c.cwd), scope));
   if (selected.length > SESSION_LIMIT) throw new Error(`范围内有 ${selected.length} 个会话，超过 ${SESSION_LIMIT} 个，请收窄日期范围或工作区`);
 
   const sessions: ExtractedSession[] = [];
@@ -144,10 +144,10 @@ export function toCards(sessions: ExtractedSession[], catalog: Catalog, hiddenBy
     cards.set(s.id, {
       id: s.id, provider: s.provider, title: clip(s.title, TITLE_MAX) || "（无标题）", startedAt: s.startedAt, endedAt: s.endedAt,
       activeMs: sumMs(spans, "run"), waitMs: sumMs(spans, "wait"), userMessages: s.userMessages,
-      unmanaged: a.unmanaged, agentId: a.agentId, workspaceId: a.workspaceId, projectId: a.projectId,
+      agentId: a.agentId, projectId: a.projectId,
       branch: s.branch, cwd: s.cwd, forkedFrom: s.forkedFrom, depth: 0,
       hiddenThreads: (hiddenByParent.get(s.id) ?? []).length,
-      spans, decisions: s.decisions.map(shortenDecision), outcome: null, error: s.error, file: s.file,
+      spans, decisions: s.decisions.map(shortenDecision), error: s.error, file: s.file,
     });
   }
   // Order: by start time; a fork whose parent is in scope sits right under the parent with depth 1.

@@ -81,10 +81,3 @@ export function SectionTitle({ children, theme, trailing }: { children: ReactNod
 export function Muted({ children, theme, size = 12 }: { children: ReactNode; theme: PluginTheme; size?: number }) {
   return <Text style={{ color: theme.colors.foregroundMuted, fontSize: size }}>{children}</Text>;
 }
-
-export function Card({ children, theme, onPress }: { children: ReactNode; theme: PluginTheme; onPress?: () => void }) {
-  const c = theme.colors;
-  const style = { backgroundColor: c.surface1, borderColor: c.border, borderWidth: 1, borderRadius: 10, padding: 10, gap: 6 } as const;
-  if (onPress) return <Pressable accessibilityRole="button" onPress={onPress} style={style}>{children}</Pressable>;
-  return <View style={style}>{children}</View>;
-}

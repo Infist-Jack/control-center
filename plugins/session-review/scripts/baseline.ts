@@ -17,5 +17,5 @@ const counts: Record<string, number> = {};
 for (const s of result.sessions) for (const d of s.decisions) counts[`${s.provider}:${d.kind}`] = (counts[`${s.provider}:${d.kind}`] ?? 0) + 1;
 console.log(JSON.stringify({
   day, elapsedMs: Date.now() - started, timezone: result.timezone, overview: result.overview, decisionCounts: counts,
-  sessions: result.sessions.map((s) => ({ id: s.id.slice(0, 8), provider: s.provider, title: s.title, start: s.startedAt, end: s.endedAt, activeMin: Math.round(s.activeMs / 60000), waitMin: Math.round(s.waitMs / 60000), msgs: s.userMessages, unmanaged: s.unmanaged, depth: s.depth, hidden: s.hiddenThreads, decisions: s.decisions.length, error: s.error })),
+  sessions: result.sessions.map((s) => ({ id: s.id.slice(0, 8), provider: s.provider, title: s.title, start: s.startedAt, end: s.endedAt, activeMin: Math.round(s.activeMs / 60000), waitMin: Math.round(s.waitMs / 60000), msgs: s.userMessages, depth: s.depth, hidden: s.hiddenThreads, decisions: s.decisions.length, error: s.error })),
 }, null, 1));
