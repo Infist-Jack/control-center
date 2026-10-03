@@ -5,11 +5,11 @@ import type { Decision, SessionCard } from "../shared/model";
 import { KIND_LABELS, fmtTime } from "./format";
 import { Muted, Pill, type Tone } from "./ui";
 
-interface Props { sessions: SessionCard[]; theme: PluginTheme; selected: string | null; onSelect(key: string | null): void }
+interface Props { sessions: SessionCard[]; theme: PluginTheme; timezone: string; selected: string | null; onSelect(key: string | null): void }
 
 const TONES: Record<string, Tone> = { question: "accent", interrupt: "warning", denied: "danger", memory: "success", "memory-index": "muted" };
 
-export function Decisions({ sessions, theme, selected, onSelect }: Props) {
+export function Decisions({ sessions, theme, timezone, selected, onSelect }: Props) {
   const c = theme.colors;
   const [showIndex, setShowIndex] = useState(false);
   const rows: Array<{ key: string; session: SessionCard; decision: Decision }> = [];
@@ -27,7 +27,7 @@ export function Decisions({ sessions, theme, selected, onSelect }: Props) {
           <Pressable key={key} accessibilityRole="button" onPress={() => onSelect(active ? null : key)}
             style={{ borderLeftWidth: 3, borderLeftColor: active ? c.statusWarning : c.border, paddingLeft: 8, paddingVertical: 4, backgroundColor: active ? c.surface1 : "transparent", borderRadius: 4 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <Text style={{ color: c.foregroundMuted, fontSize: 11, width: 40 }}>{fmtTime(decision.at)}</Text>
+              <Text style={{ color: c.foregroundMuted, fontSize: 11, width: 40 }}>{fmtTime(decision.at, timezone)}</Text>
               <Pill label={KIND_LABELS[decision.kind] ?? decision.kind} theme={theme} tone={TONES[decision.kind] ?? "muted"} />
               <Text numberOfLines={1} style={{ color: c.foregroundMuted, fontSize: 11, flexShrink: 1 }}>{session.title.slice(0, 24)}</Text>
             </View>

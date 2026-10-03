@@ -99,6 +99,8 @@ export const reviewResultSchema = z.object({
   nodes: z.array(nodeSchema).optional(),
   projects: z.array(projectSchema).optional(),
   complete: z.boolean().optional(),
+  /** Non-fatal condition of this scan, e.g. the node registry could not be read. */
+  warning: z.string().optional(),
 });
 export type ReviewResult = z.infer<typeof reviewResultSchema>;
 

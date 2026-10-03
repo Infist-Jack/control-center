@@ -3,20 +3,24 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
+import type { RegistryInfo } from "../shared/contracts.ts";
+import { readable, registryPath, type ResolvedConfig } from "./config.ts";
 import { redactText } from "./redact.ts";
 
 export interface NodeTarget { id: string; name: string }
 export interface Workspace { workspaceId: string; name: string; cwd?: string; project?: string }
 export interface Gateway {
+  /** Every node to review. This machine is always included, so the list never depends on a registry. */
   nodes(signal?: AbortSignal): Promise<NodeTarget[]>;
+  registry?(): Promise<RegistryInfo>;
   workspaces(node: NodeTarget, signal?: AbortSignal): Promise<Workspace[]>;
   collect(node: NodeTarget, workspace: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
 }
 const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
-export function command(file: string, args: string[], signal?: AbortSignal, timeout = 65000): Promise<string> {
+export function command(file: string, args: string[], signal?: AbortSignal, timeout = 65000, env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error("任务已中断")); return; }
-    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], detached: true, env: env ? { ...process.env, ...env } : process.env });
     let stdout = "", stderr = "", failure = "";
     const stop = () => { if (child.pid) { try { process.kill(-child.pid, "SIGTERM"); } catch {} } };
     const abort = () => { failure = "任务已中断"; stop(); };
@@ -44,34 +48,60 @@ export function parseFrame(output: string): any {
   return JSON.parse(gunzipSync(Buffer.from(data, "base64"), { maxOutputLength: 32 * 1024 * 1024 }).toString());
 }
 
-export class PaseoGateway implements Gateway {
-  private nodeSh: string;
-  private execSh: string;
-  private bundle: string;
+/**
+ * Reads other nodes through the paseo-nodes-use scripts when a registry is configured, and never needs one
+ * for this machine: the local node is reviewed in-process by the Fleet.
+ */
+export class PaseoGateway {
+  private config: () => ResolvedConfig;
+  private local: NodeTarget;
   private installed = new Map<string, Promise<string>>();
-  constructor(root: string) {
-    this.nodeSh = join(root, ".agents/skills/paseo-nodes-use/scripts/node.sh");
-    this.execSh = join(root, ".agents/skills/paseo-nodes-use/scripts/exec.sh");
-    this.bundle = join(root, "plugins/session-review/dist/collector.cjs");
+  constructor(config: () => ResolvedConfig, local: NodeTarget) { this.config = config; this.local = local; }
+
+  private scripts(config: ResolvedConfig) {
+    const dir = join(config.controlCenterDir, ".agents/skills/paseo-nodes-use/scripts");
+    return { nodeSh: join(dir, "node.sh"), execSh: join(dir, "exec.sh"), bundle: join(config.controlCenterDir, "plugins/session-review/dist/collector.cjs") };
   }
+  private run(file: string, args: string[], signal?: AbortSignal, timeout?: number): Promise<string> {
+    return command(file, args, signal, timeout, { PASEO_DEPLOY_DIR: this.config().nodesDir });
+  }
+
+  async registry(): Promise<RegistryInfo> {
+    const config = this.config();
+    const path = registryPath(config);
+    if (await readable(path)) return { status: "ready", path, message: `节点清单 ${path}` };
+    if (config.nodesDirExplicit) return { status: "missing", path, message: `找不到节点清单 ${path}，当前只复盘本机` };
+    return { status: "none", message: "未配置节点清单，只复盘本机" };
+  }
+
   async nodes(signal?: AbortSignal): Promise<NodeTarget[]> {
-    const rows = await command(this.nodeSh, ["list"], signal);
-    return rows.trim().split("\n").filter(Boolean).map(line => { const [name, id] = line.split("\t"); return { name, id }; });
+    const config = this.config();
+    if ((await this.registry()).status !== "ready") return [this.local];
+    const { nodeSh } = this.scripts(config);
+    if (!(await readable(nodeSh))) throw new Error(`找不到 ${nodeSh}，请在设置中填写本机的 control-center 仓库目录`);
+    const rows = await this.run(nodeSh, ["list"], signal);
+    const listed = rows.trim().split("\n").filter(Boolean)
+      .map(line => { const [name, id] = line.split("\t"); return { name, id }; })
+      .filter(n => n.id && n.name);
+    // A control node usually lists itself; keep the registry's name but never review this machine twice.
+    const self = listed.find(n => n.id === this.local.id);
+    return [self ?? this.local, ...listed.filter(n => n.id !== this.local.id)];
   }
   async workspaces(node: NodeTarget, signal?: AbortSignal): Promise<Workspace[]> {
-    return JSON.parse(await command(this.nodeSh, [node.name, "workspace", "ls", "--json"], signal));
+    return JSON.parse(await this.run(this.scripts(this.config()).nodeSh, [node.name, "workspace", "ls", "--json"], signal));
   }
   private execute(node: NodeTarget, workspace: string, code: string, signal?: AbortSignal): Promise<string> {
-    return command(this.execSh, [node.name, "--workspace", workspace, "--timeout", "300", "--", code], signal, 330000);
+    return this.run(this.scripts(this.config()).execSh, [node.name, "--workspace", workspace, "--timeout", "300", "--", code], signal, 330000);
   }
   private async install(node: NodeTarget, workspace: string, signal?: AbortSignal): Promise<string> {
-    const bytes = await readFile(this.bundle);
+    const { nodeSh, bundle } = this.scripts(this.config());
+    const bytes = await readFile(bundle);
     const digest = createHash("sha256").update(bytes).digest("hex");
     const pathCode = `require('node:path').join(process.env.PASEO_HOME||require('node:path').join(require('node:os').homedir(),'.paseo'),'session-review','collectors','${digest}.cjs')`;
     const probe = `const fs=require('node:fs'),crypto=require('node:crypto'),p=${pathCode};const b=require('node:zlib').gzipSync(JSON.stringify({path:p,exists:fs.existsSync(p)&&crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')==='${digest}'})).toString('base64');console.log('SR_BEGIN\\n'+b.match(/.{1,60}/g).join('\\n')+'\\nSR_END')`;
     const found = parseFrame(await this.execute(node, workspace, `node -e ${quote(probe)}`, signal));
     if (found.exists) return found.path;
-    const uploaded = await command(this.nodeSh, [node.name, "sdk-upload", "--timeout", "120", "--", this.bundle], signal, 420000);
+    const uploaded = await this.run(nodeSh, [node.name, "sdk-upload", "--timeout", "120", "--", bundle], signal, 420000);
     const result = uploaded.split("\n").filter(Boolean).map(s => JSON.parse(s)).find(e => e.event === "result");
     if (!result || result.sha256 !== `sha256:${digest}`) throw new Error("采集程序上传校验失败");
     const parts = result.parts.map((p: any) => ({ path: p.path, sha256: p.sha256 }));

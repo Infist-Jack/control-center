@@ -55,3 +55,24 @@
 实际验证：已重载中控插件，状态 `running`；首轮三个常用范围均已保存，4 个登记节点全部成功，最近 7 天返回 69 个会话。快照约 128 KB，位于 `~/.paseo/session-review/snapshots.json`。复制真实快照进行只读基准：恢复约 20 ms，三个范围筛选分别约 0.56 / 0.23 / 1.18 ms，节点扫描调用数为 0；该数据不含客户端 RPC 和页面渲染耗时。
 
 随后在未打开页面、未手动刷新时观察到第二轮自动采集：插件于 02:34:45 UTC 启动，约 5 分钟后的轮次于 02:40:03 UTC 写入新的今天快照，4 个节点仍全部成功。最终版本已再次重载。
+
+## 2026-10-03：任意节点安装，清单可选
+
+动机：插件只能装在中控。MacBook 这类节点没有 `/home/ubuntu/paseo-deployment` 清单，装上后每轮采集都报「找不到节点清单」。用户确认的模型是：一个装在 daemon 上的插件，永远采本机；有配对的其他节点就顺带采，没有就只采本机，被采节点不装任何服务。
+
+- `Fleet` 持有本机节点身份（`paseo status --json` 的 serverId 与 hostname，CLI 不可用时读 daemon home 的 `server-id` 文件），本机始终走进程内解析。`gateway.nodes()` 只在清单文件可读时调用 `node.sh list`，并与本机去重，保留清单里的名称；清单不可读返回本机；`node.sh list` 失败由 `Fleet` 降级为只采本机并把原因写进 `ReviewResult.warning` 和目录的 `warnings`。
+- 新增插件设置 `nodesDir`、`controlCenterDir`、`timezone`（`shared/settings.ts`，Paseo `registerSettings`，客户端新增设置页）。解析顺序为设置、环境变量、默认值：清单目录默认 `node.sh` 自己的 `/home/ubuntu/paseo-deployment`，仓库目录默认 `~/control-center`，时区默认 daemon 本机时区。显式配置的清单不存在时目录状态为 `missing` 并提示；未配置为 `none`。设置变化通过 `subscribe` 生效：改时区调用 `Snapshots.reset()` 清空快照重采，改目录只刷新。
+- `shared/time.ts` 以 IANA 时区参数化：`dateKey`、`dayStartMs`、`nextDayStartMs`、`calendarBounds` 用 `Intl` 计算当地午夜，覆盖夏令时。客户端 `fmtTime`、`fmtDate`、甘特图刻度和午夜线都使用目录返回的时区；快照按时区校验，另一时区的磁盘快照不恢复。
+- 抽取缓存文件名带版本号（`*.v5.json`），`Store.init()` 保留其他版本和无版本文件，以免破坏仍在运行的旧版读取；仅在本版本文件不存在时原子建立迁移文件，避免旧缓存覆盖已有的新抽取。
+- 页面只有一个节点时隐藏节点选择、行内节点标签和详情里的节点名，本机节点标注「（本机）」；目录里的清单状态和警告显示在页面顶部。清单变化导致旧的节点选择失效时自动回到全部节点。
+- 仓库根目录不能从插件自身位置推导：daemon 把服务端入口用 esbuild 打成字符串后 `eval`，`import.meta` 不可用，所以仓库目录仍是配置项。
+
+验证：session-review 32 项测试（新增 gateway、config、time、store 用例和 fleet 的无清单、清单失败、清单缺本机用例，snapshots 的时区切换用例），全工作区类型检查，collector 构建。
+
+### 合并前兼容性复核
+
+- 修复混合部署时迁移移走无版本缓存导致旧版详情失败，以及旧缓存覆盖已有版本化缓存的问题。保留各版本文件，迁移使用不覆盖目标的原子链接，后续抽取仍原子替换，两个版本写入互相独立。
+- 修复午夜跳过 00:00 的夏令时地区日期边界反向、`nextDayStartMs` 不前进的问题，改为查找当地日期的第一个有效时刻，并按日历日期推进。新增 Santiago、Havana 的午夜跳时与重复时刻回归；不存在的日历日期给出明确错误。
+- 更正空设置的说明：中控仍会使用已有默认清单；默认时区来自插件所在节点，不使用浏览器的时区。
+
+复核验证：修复后 34 项 session-review 测试、全工作区类型检查、collector 构建通过。中控真实最近 7 天采集覆盖 4 个登记节点，3 个在线节点成功返回 61 个会话、53 个决策点、0 个解析失败；1 个节点离线时返回部分结果，3 个成功节点的消息详情均通过。
