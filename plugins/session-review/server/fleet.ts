@@ -39,7 +39,7 @@ export class Fleet {
     };
   }
 
-  async review(scope: Scope, report: (p: Progress) => void, signal?: AbortSignal): Promise<ReviewResult> {
+  async review(scope: Scope, report: (p: Progress) => void, signal?: AbortSignal, snapshot = false): Promise<ReviewResult> {
     const targets = await this.gateway.nodes(signal);
     if (scope.nodeIds?.some(id => !targets.some(n => n.id === id))) throw new Error("节点清单已变更，请刷新页面");
     let project: string[] | undefined;
@@ -60,7 +60,7 @@ export class Fleet {
         const localScope = { range: scope.range, projectId: project?.[1] };
         let result: ReviewResult;
         if (node.id === this.localId) {
-          result = await runReview(localScope, { ...this.deps, bounds }, () => {}, signal);
+          result = await runReview(localScope, { ...this.deps, bounds, sessionLimit: snapshot ? Infinity : undefined }, () => {}, signal);
           const catalog = await loadCatalog(this.deps.homes.paseoHome);
           result.projects = redactDeep(catalog.projects.filter(p => !p.archived).map(p => ({ id: p.id, name: p.name, rootPath: p.rootPath })));
         } else {
@@ -68,7 +68,7 @@ export class Fleet {
           const workspace = chooseWorkspace(available, scope.workspaces?.[node.id] ?? this.workspaceByNode.get(node.id));
           if (!workspace) { state.status = "needs_workspace"; state.workspaces = available.map(w => ({ workspaceId: w.workspaceId, name: w.name })); state.error = "请选择一个现有工作区用于读取会话"; return; }
           this.workspaceByNode.set(node.id, workspace);
-          result = reviewResultSchema.parse(await this.gateway.collect(node, workspace, { action: "review", scope: localScope, bounds }, signal));
+          result = reviewResultSchema.parse(await this.gateway.collect(node, workspace, { action: "review", scope: localScope, bounds, snapshot }, signal));
         }
         results.set(node.id, result);
         state.status = "succeeded"; state.sessions = result.sessions.length;

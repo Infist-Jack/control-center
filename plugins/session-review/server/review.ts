@@ -38,10 +38,6 @@ export function resolveRange(range: Scope["range"], now = new Date()): { from: D
   return { from: startOfDay(fromKey), to: endOfDay(toKey), fromKey, toKey };
 }
 
-export function scopeKey(scope: Scope, resolved: { fromKey: string; toKey: string }): string {
-  return JSON.stringify([scope.projectId ?? null, resolved.fromKey, resolved.toKey, scope.nodeIds ? [...scope.nodeIds].sort() : null, Object.entries(scope.workspaces ?? {}).sort()]);
-}
-
 /** Parse or reuse the cached extraction for one candidate. Never throws; parse failures become `error`. */
 export async function extractOne(candidate: Candidate, store: Store): Promise<ExtractedSession> {
   const cached = await store.readExtract(candidate.provider, candidate.id, candidate.mtimeMs, candidate.size);
@@ -61,7 +57,7 @@ export async function extractOne(candidate: Candidate, store: Store): Promise<Ex
   }
 }
 
-export interface ReviewDeps { homes: Homes; store: Store; now?: () => Date; bounds?: { from: string; to: string; fromKey: string; toKey: string } }
+export interface ReviewDeps { homes: Homes; store: Store; now?: () => Date; bounds?: { from: string; to: string; fromKey: string; toKey: string }; sessionLimit?: number }
 
 export async function runReview(scope: Scope, deps: ReviewDeps, report: (p: Progress) => void, signal?: AbortSignal): Promise<ReviewResult> {
   const now = deps.now ? deps.now() : new Date();
@@ -100,7 +96,8 @@ export async function runReview(scope: Scope, deps: ReviewDeps, report: (p: Prog
   const deduped = foldResumedCopies(sessions, hiddenByParent);
   // A session belongs to the range if any of its activity falls inside it; the chart then shows only that part.
   const active = deduped.filter((s) => hasActivity(s, resolved.from, resolved.to));
-  if (active.length > SESSION_LIMIT) throw new Error(`范围内有 ${active.length} 个会话，超过 ${SESSION_LIMIT} 个，请收窄日期范围或项目`);
+  const limit = deps.sessionLimit ?? SESSION_LIMIT;
+  if (active.length > limit) throw new Error(`范围内有 ${active.length} 个会话，超过 ${limit} 个，请收窄日期范围或项目`);
   const cards = toCards(active, catalog, hiddenByParent, resolved.from, resolved.to);
   const spans = cards.map((c) => c.spans);
   return {

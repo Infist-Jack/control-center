@@ -2,13 +2,13 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
 import { ScrollView, TextInput } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
-import { catalogRpc, reviewStartRpc, reviewStatusRpc } from "../shared/contracts";
-import type { Range, Scope, SessionCard, ReviewResult } from "../shared/model";
+import { catalogRpc, reviewReadRpc, reviewRefreshRpc } from "../shared/contracts";
+import type { Range, Scope, SessionCard } from "../shared/model";
 import { Decisions } from "./decisions";
 import { DetailModal } from "./detail";
-import { fmtDuration } from "./format";
+import { fmtDate, fmtDuration, fmtTime } from "./format";
 import { Gantt } from "./gantt";
 import { Button, Choice, Muted, SectionTitle } from "./ui";
 
@@ -27,13 +27,12 @@ const RANGE_OPTIONS = [
 // Paseo remounts panels when the layout flips between compact and wide; keep the chosen scope across remounts.
 interface Remembered { pickedProject: string | null; rangeKind: Range["kind"]; customFrom: string; customTo: string; nodeId: string | null; workspaces: Record<string, string> }
 const remembered = new Map<string, Remembered>();
-const rememberedJobs = new Map<string, string>();
 const NODE_LABELS = { pending: "等待", running: "读取中", succeeded: "完成", offline: "离线", failed: "失败", needs_workspace: "选择工作区" };
 
 export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
   const c = theme.colors;
-  const catalogCall = useRpc(catalogRpc), startCall = useRpc(reviewStartRpc), statusCall = useRpc(reviewStatusRpc);
-  const catalog = useQuery({ queryKey: ["session-review", "catalog", hostId], queryFn: () => catalogCall({}) });
+  const catalogCall = useRpc(catalogRpc), readCall = useRpc(reviewReadRpc), refreshCall = useRpc(reviewRefreshRpc);
+  const catalog = useQuery({ queryKey: ["session-review", "catalog", hostId], queryFn: () => catalogCall({}), refetchInterval: 30_000 });
 
   const memoryKey = `${hostId}:${workspaceId ?? "surface"}`;
   const initial = remembered.get(memoryKey);
@@ -44,12 +43,9 @@ export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
   const [workspaces, setWorkspaces] = useState<Record<string, string>>(initial?.workspaces ?? {});
   useEffect(() => { remembered.set(memoryKey, { pickedProject, rangeKind, customFrom, customTo, nodeId, workspaces }); }, [memoryKey, pickedProject, rangeKind, customFrom, customTo, nodeId, workspaces]);
 
-  const [jobId, setJobId] = useState<string | null>(null);
   const [selectedDecision, setSelectedDecision] = useState<string | null>(null);
   const [openSession, setOpenSession] = useState<SessionCard | null>(null);
 
-  const [scannedProjects, setScannedProjects] = useState<NonNullable<ReviewResult["projects"]>>([]);
-  const projects = useMemo(() => [...new Map([...(catalog.data?.projects ?? []), ...scannedProjects].map(p => [p.id, p])).values()], [catalog.data, scannedProjects]);
   const fixedProject = workspaceId ? catalog.data?.workspaces.find((w) => w.id === workspaceId)?.projectId ?? null : null;
   const projectId = workspaceId ? fixedProject : pickedProject;
 
@@ -62,35 +58,20 @@ export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
       : { kind: rangeKind },
   }), [projectId, rangeKind, customFrom, customTo, nodeId, workspaceId, workspaces]);
 
-  const currentScope = useRef("");
-  currentScope.current = JSON.stringify(scope);
-  const jobMemoryKey = `${memoryKey}:${catalog.data?.today ?? ""}`;
-  const start = useMutation({ mutationFn: (s: Scope) => startCall(s), onSuccess: (r, s) => {
-    const key = `${jobMemoryKey}:${JSON.stringify(s)}`;
-    rememberedJobs.set(key, r.jobId);
-    if (JSON.stringify(s) === currentScope.current) setJobId(r.jobId);
-  } });
-  const scopeKey = JSON.stringify(scope);
-  const catalogReady = !!catalog.data;
-  useEffect(() => {
-    if (!catalogReady) return;
-    const known = rememberedJobs.get(`${jobMemoryKey}:${scopeKey}`);
-    setJobId(known ?? null);
-    if (!known) start.mutate(scope);
-  }, [scopeKey, catalogReady, jobMemoryKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const job = useQuery({
-    queryKey: ["session-review", "job", hostId, jobId],
-    queryFn: () => statusCall({ jobId: jobId! }),
-    enabled: !!jobId,
+  const snapshot = useQuery({
+    queryKey: ["session-review", "snapshot", hostId, scope, catalog.data?.today],
+    queryFn: () => readCall(scope),
+    enabled: !!catalog.data,
     retry: false,
-    refetchInterval: (q) => (!q.state.error && q.state.data?.status === "running" ? 1200 : false),
+    refetchInterval: q => q.state.data?.refreshing ? 1500 : 30_000,
   });
-  const result = job.data?.status === "succeeded" ? job.data.result : undefined;
+  const refresh = useMutation({ mutationFn: () => refreshCall(scope), onSuccess: () => { void snapshot.refetch(); } });
+  const result = snapshot.data?.result;
   const sessions = result?.sessions ?? [];
-  useEffect(() => { if (result?.projects) setScannedProjects(old => [...new Map([...old, ...result.projects!].map(p => [p.id, p])).values()]); }, [result]);
-  const loading = (!job.error && job.data?.status === "running") || start.isPending || (!!jobId && job.isLoading) || catalog.isLoading;
-  const error = catalog.error ? String(catalog.error) : start.error ? String(start.error) : job.data?.status === "failed" ? job.data.error : job.error ? String(job.error) : null;
+  const projects = useMemo(() => [...new Map([...(catalog.data?.projects ?? []), ...(result?.projects ?? [])].map(p => [p.id, p])).values()], [catalog.data, result]);
+  const loading = catalog.isLoading || snapshot.isLoading;
+  const refreshing = snapshot.data?.refreshing || refresh.isPending;
+  const error = catalog.error ? String(catalog.error) : refresh.error ? String(refresh.error) : snapshot.error ? String(snapshot.error) : snapshot.data?.error;
   const projectName = projects.find((p) => p.id === projectId)?.name;
 
   return (
@@ -118,20 +99,23 @@ export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
               <TextInput value={customTo} onChangeText={setCustomTo} placeholder="2026-09-30" placeholderTextColor={c.foregroundMuted} style={{ color: c.foreground, borderWidth: 1, borderColor: c.border, borderRadius: 6, padding: 6, width: 110, backgroundColor: c.surface1 }} />
             </View>
           )}
-          <Button label={loading ? "读取中…" : "刷新"} theme={theme} disabled={loading} onPress={() => start.mutate(scope)} />
+          <Button label={refreshing ? "后台更新中…" : "立即更新"} theme={theme} disabled={loading || refreshing} onPress={() => refresh.mutate()} />
         </View>
-        {loading && job.data?.progress ? <Muted theme={theme}>{job.data.progress.phase}{job.data.progress.total ? ` ${job.data.progress.done}/${job.data.progress.total}` : ""}</Muted> : null}
+        <Muted theme={theme}>每 5 分钟自动更新{result ? ` · 上次采集 ${fmtDate(result.generatedAt)} ${fmtTime(result.generatedAt)}` : ""}</Muted>
+        {!result && refreshing && <Muted theme={theme}>首次采集此日期范围，完成后会自动显示；离开页面后仍会继续。</Muted>}
+        {refreshing && snapshot.data?.progress ? <Muted theme={theme}>{snapshot.data.progress.phase}{snapshot.data.progress.total ? ` ${snapshot.data.progress.done}/${snapshot.data.progress.total}` : ""}</Muted> : null}
         {error ? <Text style={{ color: c.statusDanger, fontSize: 13 }}>{error}</Text> : null}
-        {(job.data?.progress.nodes ?? result?.nodes ?? catalog.data?.nodes ?? []).map(n => (
+        {(result?.nodes ?? snapshot.data?.progress?.nodes ?? catalog.data?.nodes ?? []).map(n => (
           <View key={n.id} style={{ gap: 4, paddingVertical: 4 }}>
             <Text style={{ color: n.status === "offline" || n.status === "failed" ? c.statusWarning : c.foreground, fontSize: 12 }}>{n.name} · {NODE_LABELS[n.status]}{n.sessions !== undefined ? ` · ${n.sessions} 个会话` : ""}</Text>
             {n.error && <Muted theme={theme}>{n.error}</Muted>}
+            {n.status !== "succeeded" && n.cachedAt && <Muted theme={theme}>显示上次成功采集：{fmtDate(n.cachedAt)} {fmtTime(n.cachedAt)}</Muted>}
             {n.status === "needs_workspace" && <Choice theme={theme} value={workspaces[n.id] ?? ""}
               options={[{ label: "选择现有工作区", value: "" }, ...(n.workspaces ?? []).map(w => ({ label: w.name, value: w.workspaceId }))]}
               onChange={v => { if (v) setWorkspaces(old => ({ ...old, [n.id]: v })); }} />}
           </View>
         ))}
-        {result?.complete === false && <Text style={{ color: c.statusWarning, fontSize: 12 }}>部分节点未完成，以下统计仅包含成功节点。点击刷新可重试。</Text>}
+        {result?.complete === false && <Text style={{ color: c.statusWarning, fontSize: 12 }}>部分节点未更新，已保留其上次成功采集的数据；尚无快照的节点暂不计入统计。</Text>}
       </View>
 
       {result && (

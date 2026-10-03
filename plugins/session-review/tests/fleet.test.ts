@@ -6,7 +6,7 @@ import { makeHomes } from "./fixtures.ts";
 import { Store } from "../server/store.ts";
 import { Fleet, chooseWorkspace, projectKey } from "../server/fleet.ts";
 import type { Gateway } from "../server/gateway.ts";
-import { runReview, scopeKey, sessionDetail } from "../server/review.ts";
+import { runReview, sessionDetail } from "../server/review.ts";
 import { calendarBounds } from "../shared/time.ts";
 
 test("fleet: identical IDs stay separate, offline node yields partial results and detail routes to its source", async () => {
@@ -53,11 +53,9 @@ test("workspace selection never guesses between unrelated workspaces", () => {
   assert.equal(chooseWorkspace([...rows, { workspaceId: "ops", name: "环境运维" }]), "ops");
 });
 
-test("Singapore dates ignore host timezone and jobs distinguish node scopes", () => {
+test("Singapore dates ignore host timezone", () => {
   const bounds = calendarBounds({ kind: "today" }, new Date("2026-10-01T16:30:00Z"));
   assert.equal(bounds.fromKey, "2026-10-02");
   assert.equal(new Date(bounds.from).toISOString(), "2026-10-01T16:00:00.000Z");
   assert.throws(() => calendarBounds({ kind: "custom", from: "2026-02-30" }));
-  const range = { kind: "today" as const };
-  assert.notEqual(scopeKey({ range, nodeIds: ["a"] }, bounds), scopeKey({ range, nodeIds: ["b"] }, bounds));
 });

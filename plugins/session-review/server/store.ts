@@ -16,6 +16,15 @@ export class Store {
     await mkdir(this.extractsDir, { recursive: true, mode: 0o700 });
   }
 
+  async readSnapshots(): Promise<unknown> {
+    try { return JSON.parse(await readFile(join(this.dataDir, "snapshots.json"), "utf8")); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+  }
+
+  async writeSnapshots(value: unknown): Promise<void> {
+    await this.writeAtomic(join(this.dataDir, "snapshots.json"), JSON.stringify(value));
+  }
+
   private async writeAtomic(path: string, content: string): Promise<void> {
     const tmp = `${path}.${randomUUID()}.tmp`;
     try {

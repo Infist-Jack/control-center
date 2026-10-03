@@ -83,6 +83,7 @@ export const nodeSchema = z.object({
   id: z.string(), name: z.string(),
   status: z.enum(["pending", "running", "succeeded", "offline", "failed", "needs_workspace"]),
   error: z.string().optional(), sessions: z.number().optional(),
+  cachedAt: z.string().optional(),
   workspaces: z.array(z.object({ workspaceId: z.string(), name: z.string() })).optional(),
 });
 export type NodeStatus = z.infer<typeof nodeSchema>;
@@ -117,7 +118,6 @@ export const sessionDetailSchema = z.object({
 });
 export type SessionDetail = z.infer<typeof sessionDetailSchema>;
 
-export const jobStatusSchema = z.enum(["running", "succeeded", "failed"]);
 export const progressSchema = z.object({ phase: z.string(), done: z.number(), total: z.number(), nodes: z.array(nodeSchema).optional() });
 export type Progress = z.infer<typeof progressSchema>;
 

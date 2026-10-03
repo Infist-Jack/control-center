@@ -33,7 +33,7 @@ async function main() {
     const scope = scopeSchema.parse(input.scope);
     const bounds = input.bounds;
     if (!bounds || !Number.isFinite(Date.parse(bounds.from)) || !Number.isFinite(Date.parse(bounds.to))) throw new Error("Invalid review bounds");
-    value = await runReview(scope, { homes, store, bounds }, () => {});
+    value = await runReview(scope, { homes, store, bounds, sessionLimit: input.snapshot === true ? Infinity : undefined }, () => {});
     const catalog = await loadCatalog(homes.paseoHome);
     value.projects = redactDeep(catalog.projects.filter(p => !p.archived).map(p => ({ id: p.id, name: p.name, rootPath: p.rootPath })));
   } else if (input.action === "detail") {
