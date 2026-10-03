@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { catalogRpc, reviewReadRpc, reviewRefreshRpc } from "../shared/contracts";
 import type { Range, Scope, SessionCard } from "../shared/model";
+import { localTimezone } from "../shared/time";
 import { Decisions } from "./decisions";
 import { DetailModal } from "./detail";
 import { fmtDate, fmtDuration, fmtTime } from "./format";
@@ -49,17 +50,22 @@ export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
   const fixedProject = workspaceId ? catalog.data?.workspaces.find((w) => w.id === workspaceId)?.projectId ?? null : null;
   const projectId = workspaceId ? fixedProject : pickedProject;
 
+  // With a single node there is nothing to pick; a stale node choice from a previous registry must not filter everything out.
+  const knownNodes = catalog.data?.nodes ?? [];
+  const multiNode = knownNodes.length > 1;
+  const effectiveNodeId = multiNode && nodeId && knownNodes.some(n => n.id === nodeId) ? nodeId : null;
+
   const scope: Scope = useMemo(() => ({
     projectId,
-    nodeIds: !workspaceId && nodeId ? [nodeId] : undefined,
+    nodeIds: !workspaceId && effectiveNodeId ? [effectiveNodeId] : undefined,
     workspaces,
     range: rangeKind === "custom"
       ? { kind: "custom", from: /^\d{4}-\d{2}-\d{2}$/.test(customFrom) ? customFrom : undefined, to: /^\d{4}-\d{2}-\d{2}$/.test(customTo) ? customTo : undefined }
       : { kind: rangeKind },
-  }), [projectId, rangeKind, customFrom, customTo, nodeId, workspaceId, workspaces]);
+  }), [projectId, rangeKind, customFrom, customTo, effectiveNodeId, workspaceId, workspaces]);
 
   const snapshot = useQuery({
-    queryKey: ["session-review", "snapshot", hostId, scope, catalog.data?.today],
+    queryKey: ["session-review", "snapshot", hostId, scope, catalog.data?.today, catalog.data?.timezone],
     queryFn: () => readCall(scope),
     enabled: !!catalog.data,
     retry: false,
@@ -67,25 +73,28 @@ export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
   });
   const refresh = useMutation({ mutationFn: () => refreshCall(scope), onSuccess: () => { void snapshot.refetch(); } });
   const result = snapshot.data?.result;
+  const tz = result?.timezone ?? catalog.data?.timezone ?? localTimezone();
   const sessions = result?.sessions ?? [];
   const projects = useMemo(() => [...new Map([...(catalog.data?.projects ?? []), ...(result?.projects ?? [])].map(p => [p.id, p])).values()], [catalog.data, result]);
   const loading = catalog.isLoading || snapshot.isLoading;
   const refreshing = snapshot.data?.refreshing || refresh.isPending;
   const error = catalog.error ? String(catalog.error) : refresh.error ? String(refresh.error) : snapshot.error ? String(snapshot.error) : snapshot.data?.error;
   const projectName = projects.find((p) => p.id === projectId)?.name;
+  const notices = [...(catalog.data?.warnings ?? []), ...(result?.warning ? [result.warning] : [])];
+  const nodeRows = result?.nodes ?? snapshot.data?.progress?.nodes ?? knownNodes;
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.surface0 }} contentContainerStyle={{ padding: compact ? 12 : 20, gap: 14 }}>
       <View style={{ gap: 8 }}>
-        <Muted theme={theme}>时间均为 {catalog.data?.timezone ?? "Asia/Singapore"}</Muted>
-        {workspaceId === null && <Choice theme={theme} value={nodeId ?? "__all"}
+        <Muted theme={theme}>时间均为 {tz}{catalog.data?.registry ? ` · ${catalog.data.registry.message}` : ""}</Muted>
+        {workspaceId === null && multiNode && <Choice theme={theme} value={effectiveNodeId ?? "__all"}
           onChange={v => { setNodeId(v === "__all" ? null : v); setPickedProject(null); }}
-          options={[{ label: "全部节点", value: "__all" }, ...(catalog.data?.nodes ?? []).map(n => ({ label: n.name, value: n.id }))]} />}
+          options={[{ label: "全部节点", value: "__all" }, ...knownNodes.map(n => ({ label: n.name, value: n.id }))]} />}
         {workspaceId === null ? (
           <View style={{ gap: 6 }}>
             <Muted theme={theme}>项目</Muted>
             <Choice theme={theme} value={pickedProject ?? "all"} onChange={(v) => setPickedProject(v === "all" ? null : v)}
-              options={[{ label: "全部项目", value: "all" }, ...projects.filter(p => !nodeId || p.nodeId === nodeId).map((p) => ({ label: p.name, value: p.id }))]} />
+              options={[{ label: "全部项目", value: "all" }, ...projects.filter(p => !effectiveNodeId || p.nodeId === effectiveNodeId).map((p) => ({ label: p.name, value: p.id }))]} />
           </View>
         ) : (
           <Muted theme={theme}>项目 · {projectName ?? "全部"}</Muted>
@@ -101,15 +110,16 @@ export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
           )}
           <Button label={refreshing ? "后台更新中…" : "立即更新"} theme={theme} disabled={loading || refreshing} onPress={() => refresh.mutate()} />
         </View>
-        <Muted theme={theme}>每 5 分钟自动更新{result ? ` · 上次采集 ${fmtDate(result.generatedAt)} ${fmtTime(result.generatedAt)}` : ""}</Muted>
+        <Muted theme={theme}>每 5 分钟自动更新{result ? ` · 上次采集 ${fmtDate(result.generatedAt, tz)} ${fmtTime(result.generatedAt, tz)}` : ""}</Muted>
         {!result && refreshing && <Muted theme={theme}>首次采集此日期范围，完成后会自动显示；离开页面后仍会继续。</Muted>}
         {refreshing && snapshot.data?.progress ? <Muted theme={theme}>{snapshot.data.progress.phase}{snapshot.data.progress.total ? ` ${snapshot.data.progress.done}/${snapshot.data.progress.total}` : ""}</Muted> : null}
         {error ? <Text style={{ color: c.statusDanger, fontSize: 13 }}>{error}</Text> : null}
-        {(result?.nodes ?? snapshot.data?.progress?.nodes ?? catalog.data?.nodes ?? []).map(n => (
+        {notices.map((n, i) => <Text key={`notice-${i}`} style={{ color: c.statusWarning, fontSize: 12 }}>{n}</Text>)}
+        {nodeRows.map(n => (
           <View key={n.id} style={{ gap: 4, paddingVertical: 4 }}>
-            <Text style={{ color: n.status === "offline" || n.status === "failed" ? c.statusWarning : c.foreground, fontSize: 12 }}>{n.name} · {NODE_LABELS[n.status]}{n.sessions !== undefined ? ` · ${n.sessions} 个会话` : ""}</Text>
+            <Text style={{ color: n.status === "offline" || n.status === "failed" ? c.statusWarning : c.foreground, fontSize: 12 }}>{n.id === catalog.data?.local?.id ? `${n.name}（本机）` : n.name} · {NODE_LABELS[n.status]}{n.sessions !== undefined ? ` · ${n.sessions} 个会话` : ""}</Text>
             {n.error && <Muted theme={theme}>{n.error}</Muted>}
-            {n.status !== "succeeded" && n.cachedAt && <Muted theme={theme}>显示上次成功采集：{fmtDate(n.cachedAt)} {fmtTime(n.cachedAt)}</Muted>}
+            {n.status !== "succeeded" && n.cachedAt && <Muted theme={theme}>显示上次成功采集：{fmtDate(n.cachedAt, tz)} {fmtTime(n.cachedAt, tz)}</Muted>}
             {n.status === "needs_workspace" && <Choice theme={theme} value={workspaces[n.id] ?? ""}
               options={[{ label: "选择现有工作区", value: "" }, ...(n.workspaces ?? []).map(w => ({ label: w.name, value: w.workspaceId }))]}
               onChange={v => { if (v) setWorkspaces(old => ({ ...old, [n.id]: v })); }} />}
@@ -133,14 +143,14 @@ export function Review({ theme, compact, hostId, workspaceId }: ReviewProps) {
       {result && (
         <View style={{ gap: 8 }}>
           <SectionTitle theme={theme}>会话</SectionTitle>
-          <Gantt sessions={sessions} theme={theme} compact={compact} selectedDecision={selectedDecision}
+          <Gantt sessions={sessions} theme={theme} compact={compact} timezone={tz} showNode={multiNode} selectedDecision={selectedDecision}
             onPickDecision={(sid, did) => setSelectedDecision(`${sid}:${did}`)} onOpenDetail={setOpenSession} />
           <SectionTitle theme={theme}>决策点</SectionTitle>
-          <Decisions sessions={sessions} theme={theme} selected={selectedDecision} onSelect={setSelectedDecision} />
+          <Decisions sessions={sessions} theme={theme} timezone={tz} selected={selectedDecision} onSelect={setSelectedDecision} />
         </View>
       )}
 
-      <DetailModal session={openSession} hostId={hostId} theme={theme} onClose={() => setOpenSession(null)} />
+      <DetailModal session={openSession} hostId={hostId} theme={theme} timezone={tz} showNode={multiNode} onClose={() => setOpenSession(null)} />
     </ScrollView>
   );
 }

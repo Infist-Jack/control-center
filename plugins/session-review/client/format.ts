@@ -1,15 +1,16 @@
-import { REVIEW_TIMEZONE } from "../shared/time";
-export function fmtTime(iso: string): string {
+import { dateKey, zonedParts } from "../shared/time";
+
+export function fmtTime(iso: string | number, tz: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "--:--";
-  return new Intl.DateTimeFormat("en-GB", { timeZone: REVIEW_TIMEZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+  const p = zonedParts(d, tz);
+  return `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
 }
 
-export function fmtDate(iso: string | number): string {
+export function fmtDate(iso: string | number, tz: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: REVIEW_TIMEZONE, month: "2-digit", day: "2-digit" }).formatToParts(d);
-  return `${parts.find(p => p.type === "month")!.value}-${parts.find(p => p.type === "day")!.value}`;
+  return dateKey(d, tz).slice(5);
 }
 
 export function fmtDuration(ms: number): string {

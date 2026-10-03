@@ -1,7 +1,7 @@
 // Operational smoke test: print only node status/counts, never session messages.
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { Fleet, localServerId } from "../server/fleet.ts";
+// Runs outside the daemon, so plugin settings do not apply; use SR_CONTROL_CENTER, PASEO_DEPLOY_DIR and SR_TIMEZONE.
+import { resolveConfig } from "../server/config.ts";
+import { Fleet, localNode } from "../server/fleet.ts";
 import { PaseoGateway } from "../server/gateway.ts";
 import { resolveHomes } from "../server/paths.ts";
 import { Store } from "../server/store.ts";
@@ -12,7 +12,10 @@ const range: Range = ["today", "yesterday", "last7"].includes(kind)
   : { kind: "custom", from: kind, to: process.argv[3] ?? kind };
 const homes = resolveHomes();
 const store = new Store(homes.dataDir); await store.init();
-const fleet = new Fleet(new PaseoGateway(process.env.SR_CONTROL_CENTER || join(homedir(), "control-center")), { homes, store }, await localServerId());
+const config = resolveConfig(undefined);
+const local = await localNode(homes);
+const fleet = new Fleet(new PaseoGateway(() => config, local), { homes, store }, local, { timezone: () => config.timezone, warnings: () => config.warnings });
+console.log(JSON.stringify({ event: "catalog", local, registry: await new PaseoGateway(() => config, local).registry(), timezone: config.timezone, warnings: config.warnings }));
 const result = await fleet.review({ range }, p => console.log(JSON.stringify({ event: "progress", done: p.done, total: p.total, nodes: p.nodes })));
 const details = [];
 for (const node of result.nodes ?? []) {
@@ -23,5 +26,5 @@ for (const node of result.nodes ?? []) {
     details.push({ node: node.name, ok: true, pageMessages: detail.messages.length, totalMessages: detail.totalMessages });
   } catch (error) { details.push({ node: node.name, ok: false, error: String(error) }); }
 }
-console.log(JSON.stringify({ event: "result", from: result.from, to: result.to, timezone: result.timezone, complete: result.complete, nodes: result.nodes, overview: result.overview, projects: result.projects?.length, details }));
+console.log(JSON.stringify({ event: "result", from: result.from, to: result.to, timezone: result.timezone, complete: result.complete, warning: result.warning, nodes: result.nodes, overview: result.overview, projects: result.projects?.length, details }));
 if (result.nodes?.every(n => n.status !== "succeeded") || details.some(d => !d.ok)) process.exitCode = 1;

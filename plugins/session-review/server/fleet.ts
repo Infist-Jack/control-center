@@ -1,9 +1,14 @@
+import { readFile } from "node:fs/promises";
+import { hostname } from "node:os";
+import { join } from "node:path";
+import type { ReviewCatalog, RegistryInfo } from "../shared/contracts.ts";
 import type { Progress, ReviewResult, Scope, SessionCard } from "../shared/model.ts";
 import { reviewResultSchema, sessionDetailSchema } from "../shared/model.ts";
-import { calendarBounds, REVIEW_TIMEZONE } from "../shared/time.ts";
+import { calendarBounds } from "../shared/time.ts";
 import { loadCatalog } from "./catalog.ts";
 import type { Gateway, NodeTarget, Workspace } from "./gateway.ts";
 import { command } from "./gateway.ts";
+import type { Homes } from "./paths.ts";
 import { redactDeep, redactText } from "./redact.ts";
 import { runReview, sessionDetail, type ReviewDeps } from "./review.ts";
 import { peakParallel, unionRunMs } from "./spans.ts";
@@ -21,26 +26,47 @@ export function chooseWorkspace(available: Workspace[], selected?: string): stri
   return undefined;
 }
 
+export interface FleetOptions { timezone: () => string; warnings?: () => string[] }
+
+/** This machine is always reviewed in-process; other nodes come from the gateway when it has any. */
 export class Fleet {
   private workspaceByNode = new Map<string, string>();
   private gateway: Gateway;
   private deps: ReviewDeps;
-  private localId: string;
-  constructor(gateway: Gateway, deps: ReviewDeps, localId: string) { this.gateway = gateway; this.deps = deps; this.localId = localId; }
+  readonly local: NodeTarget;
+  private options: FleetOptions;
+  constructor(gateway: Gateway, deps: ReviewDeps, local: NodeTarget, options: FleetOptions) {
+    this.gateway = gateway; this.deps = deps; this.local = local; this.options = options;
+  }
 
-  async catalog(signal?: AbortSignal) {
-    const targets = await this.gateway.nodes(signal);
+  /** A registry that cannot be read must not stop the local review. */
+  private async targets(signal?: AbortSignal): Promise<{ targets: NodeTarget[]; warning?: string }> {
+    try {
+      const targets = await this.gateway.nodes(signal);
+      return { targets: targets.some(n => n.id === this.local.id) ? targets : [this.local, ...targets] };
+    } catch (error) {
+      return { targets: [this.local], warning: `无法读取节点清单，只复盘本机：${redactText(error instanceof Error ? error.message : String(error))}` };
+    }
+  }
+
+  async catalog(signal?: AbortSignal): Promise<ReviewCatalog> {
+    const tz = this.options.timezone();
+    const { targets, warning } = await this.targets(signal);
+    const registry: RegistryInfo = this.gateway.registry ? await this.gateway.registry() : { status: "none", message: "未配置节点清单，只复盘本机" };
     const catalog = await loadCatalog(this.deps.homes.paseoHome);
     return {
       nodes: targets.map(n => ({ ...n, status: "pending" as const })),
-      projects: redactDeep(catalog.projects.filter(p => !p.archived).map(p => ({ id: projectKey(this.localId, p.id), nodeId: this.localId, name: p.name, rootPath: p.rootPath }))),
-      workspaces: catalog.workspaces.map(w => ({ id: w.id, projectId: projectKey(this.localId, w.projectId) })),
-      timezone: REVIEW_TIMEZONE, today: calendarBounds({ kind: "today" }).fromKey, dataDir: this.deps.homes.dataDir,
+      local: this.local, registry,
+      warnings: [...(this.options.warnings?.() ?? []), ...(warning ? [warning] : [])],
+      projects: redactDeep(catalog.projects.filter(p => !p.archived).map(p => ({ id: projectKey(this.local.id, p.id), nodeId: this.local.id, name: p.name, rootPath: p.rootPath }))),
+      workspaces: catalog.workspaces.map(w => ({ id: w.id, projectId: projectKey(this.local.id, w.projectId) })),
+      timezone: tz, today: calendarBounds({ kind: "today" }, tz, this.deps.now?.()).fromKey, dataDir: this.deps.homes.dataDir,
     };
   }
 
   async review(scope: Scope, report: (p: Progress) => void, signal?: AbortSignal, snapshot = false): Promise<ReviewResult> {
-    const targets = await this.gateway.nodes(signal);
+    const tz = this.options.timezone();
+    const { targets, warning } = await this.targets(signal);
     if (scope.nodeIds?.some(id => !targets.some(n => n.id === id))) throw new Error("节点清单已变更，请刷新页面");
     let project: string[] | undefined;
     if (scope.projectId) {
@@ -48,7 +74,7 @@ export class Fleet {
       if (!Array.isArray(project) || project.length !== 2 || project.some(p => typeof p !== "string") || !targets.some(n => n.id === project![0])) throw new Error("项目选择已过期，请重新选择");
     }
     const selected = targets.filter(n => (!scope.nodeIds || scope.nodeIds.includes(n.id)) && (!project || n.id === project[0]));
-    const bounds = calendarBounds(scope.range, this.deps.now?.());
+    const bounds = calendarBounds(scope.range, tz, this.deps.now?.());
     const states: NonNullable<ReviewResult["nodes"]> = selected.map(n => ({ ...n, status: "pending" }));
     const results = new Map<string, ReviewResult>();
     const emit = () => report({ phase: "扫描节点", done: states.filter(s => !["pending", "running"].includes(s.status)).length, total: states.length, nodes: states.map(s => ({ ...s })) });
@@ -59,7 +85,7 @@ export class Fleet {
       try {
         const localScope = { range: scope.range, projectId: project?.[1] };
         let result: ReviewResult;
-        if (node.id === this.localId) {
+        if (node.id === this.local.id) {
           result = await runReview(localScope, { ...this.deps, bounds, sessionLimit: snapshot ? Infinity : undefined }, () => {}, signal);
           const catalog = await loadCatalog(this.deps.homes.paseoHome);
           result.projects = redactDeep(catalog.projects.filter(p => !p.archived).map(p => ({ id: p.id, name: p.name, rootPath: p.rootPath })));
@@ -94,14 +120,14 @@ export class Fleet {
       })));
     }
     const spans = sessions.map(s => s.spans);
-    return { scope, from: bounds.fromKey, to: bounds.toKey, timezone: REVIEW_TIMEZONE, generatedAt: new Date().toISOString(),
-      sessions, projects, nodes: states, complete: states.every(n => n.status === "succeeded"),
+    return { scope, from: bounds.fromKey, to: bounds.toKey, timezone: tz, generatedAt: new Date().toISOString(),
+      sessions, projects, nodes: states, complete: states.every(n => n.status === "succeeded"), warning,
       overview: { sessions: sessions.length, peakParallel: peakParallel(spans), activeMs: unionRunMs(spans), waitMs: sessions.reduce((a, s) => a + s.waitMs, 0), decisions: sessions.reduce((a, s) => a + s.decisions.length, 0), unparsable: sessions.filter(s => s.error).length },
     };
   }
 
   async detail(nodeId: string | undefined, provider: "claude" | "codex", id: string, offset: number, signal?: AbortSignal) {
-    if (!nodeId || nodeId === this.localId) return sessionDetail(provider, id, this.deps.store, offset);
+    if (!nodeId || nodeId === this.local.id) return sessionDetail(provider, id, this.deps.store, offset);
     const node = (await this.gateway.nodes(signal)).find(n => n.id === nodeId);
     if (!node) throw new Error("节点已不在登记清单中");
     const available = await this.gateway.workspaces(node, signal);
@@ -111,8 +137,15 @@ export class Fleet {
   }
 }
 
-export async function localServerId(): Promise<string> {
-  const status = JSON.parse(await command("paseo", ["status", "--json"]));
-  if (typeof status.serverId !== "string") throw new Error("无法识别中控节点身份");
-  return status.serverId;
+/** Identity of this daemon: `paseo status` when the CLI is reachable, otherwise the daemon home's server-id file. */
+export async function localNode(homes: Pick<Homes, "paseoHome">): Promise<NodeTarget> {
+  let id: string | undefined, name: string | undefined;
+  try {
+    const status = JSON.parse(await command("paseo", ["status", "--json"], undefined, 15000));
+    if (typeof status.serverId === "string") id = status.serverId;
+    if (typeof status.hostname === "string" && status.hostname) name = status.hostname;
+  } catch { /* CLI not on PATH or daemon not reachable; fall back to the home file. */ }
+  if (!id) { try { id = (await readFile(join(homes.paseoHome, "server-id"), "utf8")).trim() || undefined; } catch { /* below */ } }
+  if (!id) throw new Error("无法识别本机 Paseo 节点身份");
+  return { id, name: name || hostname() };
 }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { catalogSchema, type ReviewCatalog } from "../shared/contracts.ts";
 import { rangeSchema, reviewResultSchema, SESSION_LIMIT, type Progress, type Range, type ReviewResult, type Scope } from "../shared/model.ts";
-import { calendarBounds, REVIEW_TIMEZONE } from "../shared/time.ts";
+import { calendarBounds } from "../shared/time.ts";
 import type { Fleet } from "./fleet.ts";
 import { redactText } from "./redact.ts";
 import { peakParallel, unionRunMs } from "./spans.ts";
@@ -62,6 +62,7 @@ export class Snapshots {
   private store: Store;
   private source: Source;
   private now: () => Date;
+  private timezone: () => string;
   private entries = new Map<string, Entry>();
   private pending = new Set<string>();
   private customRanges: Range[] = [];
@@ -73,16 +74,22 @@ export class Snapshots {
   private writes: Promise<void> = Promise.resolve();
   private storageError?: string;
   private abort = new AbortController();
+  /** Bumped by reset(); a scan started under an older generation discards its result. */
+  private generation = 0;
 
-  constructor(store: Store, source: Source, now = () => new Date()) { this.store = store; this.source = source; this.now = now; }
+  constructor(store: Store, source: Source, now = () => new Date(), timezone: () => string) {
+    this.store = store; this.source = source; this.now = now; this.timezone = timezone;
+  }
 
   async init(): Promise<void> {
     try {
       const raw = await this.store.readSnapshots();
       if (raw) {
         const saved = diskSchema.parse(raw);
+        const tz = this.timezone();
         this.savedCatalog = saved.catalog; this.customRanges = saved.customRanges.slice(-8); this.workspaces = saved.workspaces;
-        for (const result of saved.results.slice(-32)) this.entries.set(`${result.from}/${result.to}`, { result });
+        // Calendar days only mean the same thing under the timezone they were computed in.
+        for (const result of saved.results.filter(r => r.timezone === tz).slice(-32)) this.entries.set(`${result.from}/${result.to}`, { result });
       }
     } catch { this.storageError = "本地快照无法读取，正在重新采集"; }
     if (this.abort.signal.aborted) return;
@@ -95,11 +102,12 @@ export class Snapshots {
     const projects = new Map((this.savedCatalog?.projects ?? []).map(p => [p.id, p]));
     for (const entry of this.entries.values()) for (const p of entry.result?.projects ?? []) projects.set(p.id, p);
     return { projects: [...projects.values()], nodes: this.savedCatalog?.nodes ?? [], workspaces: this.savedCatalog?.workspaces ?? [],
-      timezone: REVIEW_TIMEZONE, today: calendarBounds({ kind: "today" }, this.now()).fromKey, dataDir: this.store.dataDir };
+      local: this.savedCatalog?.local, registry: this.savedCatalog?.registry, warnings: this.savedCatalog?.warnings,
+      timezone: this.timezone(), today: calendarBounds({ kind: "today" }, this.timezone(), this.now()).fromKey, dataDir: this.store.dataDir };
   }
 
   private key(range: Range): string {
-    const b = calendarBounds(range, this.now()); return `${b.fromKey}/${b.toKey}`;
+    const b = calendarBounds(range, this.timezone(), this.now()); return `${b.fromKey}/${b.toKey}`;
   }
 
   private enqueue(range: Range): void {
@@ -134,6 +142,15 @@ export class Snapshots {
     return this.pump();
   }
 
+  /** Settings changed the calendar: forget every range and start over, keeping custom ranges and workspace choices. */
+  reset(): Promise<void> {
+    this.generation++;
+    this.entries.clear(); this.pending.clear(); this.current = undefined;
+    if (this.abort.signal.aborted) return Promise.resolve();
+    if (this.running) return this.running.then(() => this.refresh());
+    return this.refresh();
+  }
+
   private save(): Promise<void> {
     this.writes = this.writes.then(async () => {
       await this.store.writeSnapshots({ version: 1, extractVersion: EXTRACT_VERSION, catalog: this.savedCatalog,
@@ -150,6 +167,7 @@ export class Snapshots {
     this.running = Promise.resolve().then(async () => {
       try { this.savedCatalog = await this.source.catalog(this.abort.signal); } catch { /* Keep the saved catalog while offline. */ }
       while (this.pending.size && !this.abort.signal.aborted) {
+        const generation = this.generation;
         const [key] = this.pending.keys();
         this.pending.delete(key); this.current = key;
         const entry = this.entries.get(key)!;
@@ -159,10 +177,12 @@ export class Snapshots {
           const result = await this.source.review({ range: { kind: "custom", from, to }, workspaces: { ...this.workspaces } },
             p => { entry.progress = p; }, this.abort.signal, true);
           if (this.abort.signal.aborted) break;
+          if (generation !== this.generation) continue;
           entry.result = retainOffline(result, entry.result);
           this.entries.delete(key); this.entries.set(key, entry);
         } catch (error) {
           if (this.abort.signal.aborted) break;
+          if (generation !== this.generation) continue;
           entry.error = redactText(error instanceof Error ? error.message : String(error));
         }
         entry.progress = undefined;

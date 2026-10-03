@@ -11,15 +11,16 @@ import { Store } from "../server/store.ts";
 
 const TODAY: Scope = { range: { kind: "today" } };
 const INITIAL = new Date("2026-10-03T04:00:00Z");
+const TZ = "Asia/Singapore";
 function card(nodeId: string, projectId = projectKey(nodeId, nodeId)): SessionCard {
   return { id: `${nodeId}-s`, sourceId: "s", nodeId, nodeName: nodeId, provider: "claude", title: "Synthetic session",
     startedAt: INITIAL.toISOString(), endedAt: INITIAL.toISOString(), sessionStartedAt: INITIAL.toISOString(), sessionEndedAt: INITIAL.toISOString(),
     continued: false, activeMs: 0, waitMs: 0, userMessages: 1, userMessagesTotal: 1, agentId: null, projectId,
     branch: null, cwd: "/synthetic", forkedFrom: null, depth: 0, hiddenThreads: 0, spans: [], decisions: [], error: null, file: "/synthetic/s.jsonl" };
 }
-function result(scope: Scope, at = INITIAL): ReviewResult {
-  const bounds = calendarBounds(scope.range, at);
-  return { scope, from: bounds.fromKey, to: bounds.toKey, timezone: "Asia/Singapore", generatedAt: at.toISOString(),
+function result(scope: Scope, at = INITIAL, tz = TZ): ReviewResult {
+  const bounds = calendarBounds(scope.range, tz, at);
+  return { scope, from: bounds.fromKey, to: bounds.toKey, timezone: tz, generatedAt: at.toISOString(),
     sessions: [card("a"), card("b")], projects: ["a", "b"].map(id => ({ id: projectKey(id, id), nodeId: id, name: "同名项目", rootPath: "/synthetic" })),
     nodes: ["a", "b"].map(id => ({ id, name: id, status: "succeeded", sessions: 1 })), complete: true,
     overview: { sessions: 2, peakParallel: 0, activeMs: 0, waitMs: 0, decisions: 0, unparsable: 0 } };
@@ -27,15 +28,15 @@ function result(scope: Scope, at = INITIAL): ReviewResult {
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "review-snapshots-"));
   const store = new Store(root); await store.init();
-  let now = INITIAL, calls = 0, catalogCalls = 0;
-  let scan: Pick<Fleet, "review">["review"] = async scope => result(scope, now);
+  let now = INITIAL, tz = TZ, calls = 0, catalogCalls = 0;
+  let scan: Pick<Fleet, "review">["review"] = async scope => result(scope, now, tz);
   const source: Pick<Fleet, "catalog" | "review"> = {
-    catalog: async () => { catalogCalls++; return { nodes: [], projects: [], workspaces: [], today: "2026-10-03", timezone: "Asia/Singapore", dataDir: root }; },
+    catalog: async () => { catalogCalls++; return { nodes: [], projects: [], workspaces: [], today: "2026-10-03", timezone: tz, dataDir: root }; },
     review: async (...args) => { calls++; assert.equal(args[3], true); return scan(...args); },
   };
-  const snapshots = new Snapshots(store, source, () => now);
-  return { root, store, source, snapshots, calls: () => calls, catalogCalls: () => catalogCalls,
-    setScan: (fn: typeof scan) => { scan = fn; }, setNow: (at: Date) => { now = at; } };
+  const snapshots = new Snapshots(store, source, () => now, () => tz);
+  return { root, store, source, snapshots, calls: () => calls, catalogCalls: () => catalogCalls, tz: () => tz,
+    setScan: (fn: typeof scan) => { scan = fn; }, setNow: (at: Date) => { now = at; }, setTz: (next: string) => { tz = next; } };
 }
 
 test("snapshots: daemon warms three ranges, reads/filtering do no network work, timer scans every five minutes", async t => {
@@ -67,7 +68,7 @@ test("snapshots: restart serves disk immediately while startup scan hangs; refre
   try {
     await h.snapshots.init(); await h.snapshots.refresh(); h.snapshots.dispose();
     h.setScan(async (scope, _report, signal) => { await gate; assert.equal(signal?.aborted, true); return result(scope); });
-    restored = new Snapshots(h.store, h.source, () => INITIAL);
+    restored = new Snapshots(h.store, h.source, () => INITIAL, h.tz);
     await restored.init();
     assert.equal(restored.read(TODAY).result?.sessions.length, 2);
     const a = restored.refresh(), b = restored.refresh(); assert.equal(a, b);
@@ -128,7 +129,7 @@ test("snapshots: corrupt files rebuild, saved workspace choices are reused on re
     h.snapshots.read({ ...TODAY, workspaces: { a: "existing-workspace" } });
     await h.snapshots.refresh(); h.snapshots.dispose();
     h.setScan(async scope => { assert.equal(scope.workspaces?.a, "existing-workspace"); return result(scope); });
-    restored = new Snapshots(h.store, h.source, () => INITIAL);
+    restored = new Snapshots(h.store, h.source, () => INITIAL, h.tz);
     await restored.init(); await restored.refresh();
     assert.equal(restored.read(TODAY).error, undefined);
   } finally { restored?.dispose(); h.snapshots.dispose(); await rm(h.root, { recursive: true, force: true }); }
@@ -145,4 +146,28 @@ test("snapshots: UI limits apply after cached project filtering without truncati
   r.sessions = []; r.projects = []; r.nodes![0].status = "offline";
   const offline = filterSnapshot(r, { ...TODAY, projectId: projectKey("a", "a") });
   assert.equal(offline.nodes?.[0].status, "offline"); assert.equal(offline.complete, false);
+});
+
+test("snapshots: a timezone change resets the calendar, and saved ranges from another timezone are not restored", async () => {
+  const h = await setup();
+  let restored: Snapshots | undefined;
+  try {
+    await h.snapshots.init(); await h.snapshots.refresh();
+    assert.equal(h.snapshots.read(TODAY).result?.from, "2026-10-03");
+    // 04:00Z is still 2026-10-02 in Los Angeles; the old key must not be served as today.
+    h.setTz("America/Los_Angeles");
+    await h.snapshots.reset();
+    assert.equal(h.snapshots.catalog().timezone, "America/Los_Angeles");
+    assert.equal(h.snapshots.read(TODAY).result?.from, "2026-10-02");
+    assert.equal(h.snapshots.read(TODAY).result?.timezone, "America/Los_Angeles");
+    assert.equal(h.calls(), 6);
+    h.snapshots.dispose();
+    // Restart under the original timezone: the Los Angeles snapshots on disk are ignored and rebuilt.
+    h.setTz(TZ);
+    restored = new Snapshots(h.store, h.source, () => INITIAL, h.tz);
+    await restored.init();
+    assert.equal(restored.read(TODAY).result, undefined);
+    await restored.refresh();
+    assert.equal(restored.read(TODAY).result?.from, "2026-10-03");
+  } finally { restored?.dispose(); h.snapshots.dispose(); await rm(h.root, { recursive: true, force: true }); }
 });
