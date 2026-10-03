@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { ExtractedSession } from "./sources/types.ts";
@@ -20,7 +20,7 @@ export class Store {
 
   /**
    * The version is part of the file name, so a collector and a plugin of different versions sharing this
-   * directory never overwrite each other's extracts. Older versions are dropped; newer ones are left alone.
+   * directory never overwrite each other's extracts. Other versions and legacy files may still be in use.
    */
   private async migrateExtracts(): Promise<void> {
     let names: string[] = [];
@@ -29,12 +29,11 @@ export class Store {
       if (!name.endsWith(".json")) continue;
       const path = join(this.extractsDir, name);
       const versioned = VERSIONED.exec(name);
-      if (versioned) { if (Number(versioned[1]) < EXTRACT_VERSION) await unlink(path).catch(() => {}); continue; }
-      // Legacy unversioned file: keep it under the new name when its content is current, otherwise drop it.
+      if (versioned) continue;
+      // Seed our version atomically without removing a legacy reader's file or replacing a newer extraction.
       let version: number | undefined;
       try { version = (JSON.parse(await readFile(path, "utf8")) as { version?: number }).version; } catch { /* unreadable */ }
-      if (version === EXTRACT_VERSION) await rename(path, path.replace(/\.json$/, `.v${EXTRACT_VERSION}.json`)).catch(() => {});
-      else await unlink(path).catch(() => {});
+      if (version === EXTRACT_VERSION) await link(path, path.replace(/\.json$/, `.v${EXTRACT_VERSION}.json`)).catch(() => {});
     }
   }
 

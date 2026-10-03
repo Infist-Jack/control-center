@@ -25,7 +25,7 @@ Paseo 设置页「复盘」里的三项都可以留空：
 
 | 设置 | 留空时 | 填写后 |
 |---|---|---|
-| 节点清单目录 | 只复盘本机 | 读取其中的 `relay-allowed-hosts.json` 和 `.private/` 配对链接，同时复盘清单里的节点。中控上这就是 `paseo-nodes-use` 使用的部署目录 |
+| 节点清单目录 | 使用环境变量或默认清单；找不到清单时只复盘本机 | 读取其中的 `relay-allowed-hosts.json` 和 `.private/` 配对链接，同时复盘清单里的节点。中控上这就是 `paseo-nodes-use` 使用的部署目录 |
 | control-center 仓库目录 | `~/control-center` | 本机仓库检出位置，采集其他节点时使用其中的 `paseo-nodes-use` 脚本和 `dist/collector.cjs` |
 | 时区 | daemon 本机时区 | 日期范围和时间轴使用的 IANA 时区；跨节点复盘时各节点建议填同一个值 |
 
@@ -47,7 +47,7 @@ Paseo 设置页「复盘」里的三项都可以留空：
 
 - 原始会话保留在来源节点，解析与脱敏在节点本机完成。只读取当前 daemon 用户的会话目录。
 - 快照和已选工作区保存在 `~/.paseo/session-review/snapshots.json`（或 `$PASEO_HOME/session-review/snapshots.json`），位于仓库外，不提交 Git。文件权限为 `0600`，使用原子替换；最多保留 32 个日期范围快照，重载或重启插件后恢复，另一时区下生成的快照不会被复用。
-- 脱敏后的抽取缓存位于各节点 `~/.paseo/session-review/extracts/`，文件名带解析版本号（`*.v5.json`），支持 `PASEO_HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`。一台机器同时被中控采集又自己装了插件时，不同版本的缓存互不覆盖；旧版本缓存在启动时清理，旧的无版本文件按内容迁移。
+- 脱敏后的抽取缓存位于各节点 `~/.paseo/session-review/extracts/`，文件名带解析版本号（`*.v5.json`），支持 `PASEO_HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`。一台机器同时被中控采集又自己装了插件时，不同版本的缓存互不覆盖；启动时保留其他版本和无版本文件，供仍在运行的旧版读取；仅在当前版本文件不存在时，为内容版本一致的旧文件建立缓存，不覆盖已有结果。
 - 采集程序按内容摘要保存到远端节点的 `session-review/collectors/`，使用现有 Paseo 上传通道并校验摘要；临时上传分片在拼接后删除。
 - 大结果通过压缩、分块读取绕开终端滚动缓冲限制。临时结果放在 `session-review/transfers/`，读取后删除；传输中断留下的结果在后续大结果采集时清理超过一天的文件。
 - 后台快照采集全部项目。页面按节点、项目筛选后，每个节点最多展示 200 个可见会话；超限提示收窄范围，不截断快照。

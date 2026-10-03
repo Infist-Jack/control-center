@@ -35,3 +35,21 @@ test("time: timezone validation and the host default", () => {
   assert.equal(isValidTimezone("Mars/Olympus"), false); assert.equal(isValidTimezone(""), false); assert.equal(isValidTimezone("Asia/Singapore; rm -rf"), false);
   assert.ok(isValidTimezone(localTimezone()));
 });
+
+test("time: midnight DST gaps and folds advance calendar days without trapping the timeline", () => {
+  for (const [tz, key, start, end] of [
+    ["America/Santiago", "2026-09-06", "2026-09-06T04:00:00.000Z", "2026-09-07T02:59:59.999Z"],
+    ["America/Havana", "2026-03-08", "2026-03-08T05:00:00.000Z", "2026-03-09T03:59:59.999Z"],
+    ["America/Havana", "2026-11-01", "2026-11-01T04:00:00.000Z", "2026-11-02T04:59:59.999Z"],
+  ]) {
+    const bounds = calendarBounds({ kind: "custom", from: key, to: key }, tz);
+    assert.equal(bounds.from, start); assert.equal(bounds.to, end);
+    let cursor = dayStartMs(key, tz);
+    assert.equal(dateKey(new Date(cursor), tz), key);
+    for (let i = 0; i < 8; i++) {
+      const next = nextDayStartMs(cursor, tz);
+      assert.ok(next > cursor, "the Gantt midnight loop must make progress"); cursor = next;
+    }
+  }
+  assert.throws(() => calendarBounds({ kind: "custom", from: "2011-12-30" }, "Pacific/Apia"), /不存在/);
+});

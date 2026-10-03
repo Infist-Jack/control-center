@@ -2,7 +2,7 @@ import { defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
 
 export const settingsSchema = z.object({
-  /** Directory holding relay-allowed-hosts.json and .private/ pairing links (the paseo-nodes-use convention). Empty: review this machine only. */
+  /** Directory holding relay-allowed-hosts.json and .private/ pairing links (the paseo-nodes-use convention). Empty: environment or default registry; local-only if absent. */
   nodesDir: z.string().default(""),
   /** Checkout of this repository on this machine; its paseo-nodes-use scripts read the other nodes. Empty: ~/control-center. */
   controlCenterDir: z.string().default(""),

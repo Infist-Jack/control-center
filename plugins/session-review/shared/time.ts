@@ -39,16 +39,23 @@ export function dateKey(at: Date, tz: string): string {
 
 /** The instant at which calendar day `key` starts in `tz`. */
 export function dayStartMs(key: string, tz: string): number {
-  const naive = Date.parse(`${key}T00:00:00Z`);
-  let utc = naive - tzOffsetMs(new Date(naive), tz);
-  utc = naive - tzOffsetMs(new Date(utc), tz); // A second pass settles DST transitions.
-  return utc;
+  const naive = Date.parse(`${key}T00:00:00Z`) / 1000;
+  // Find the first instant in this date, including days that jump straight from 23:59 to 01:00.
+  // Offset iteration can oscillate across a nonexistent midnight and return the previous day.
+  let lo = naive - 36 * 3600, hi = naive + 36 * 3600;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (dateKey(new Date(mid * 1000), tz) < key) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo * 1000;
 }
 
 /** Start of the calendar day after the one containing `ms`. */
 export function nextDayStartMs(ms: number, tz: string): number {
-  // 36 hours past a day's start lands in the following day whatever the DST shift.
-  return dayStartMs(dateKey(new Date(dayStartMs(dateKey(new Date(ms), tz), tz) + 36 * 3_600_000), tz), tz);
+  const key = dateKey(new Date(ms), tz);
+  const next = new Date(Date.parse(`${key}T00:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+  return dayStartMs(next, tz);
 }
 
 export interface CalendarBounds { fromKey: string; toKey: string; from: string; to: string; timezone: string }
@@ -65,6 +72,8 @@ export function calendarBounds(range: { kind: string; from?: string; to?: string
     if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || !Number.isFinite(Date.parse(`${key}T00:00:00Z`)) || new Date(`${key}T00:00:00Z`).toISOString().slice(0, 10) !== key) throw new Error("请输入有效日期");
   }
   const from = dayStartMs(fromKey, tz);
-  const to = nextDayStartMs(dayStartMs(toKey, tz), tz) - 1;
+  const lastDay = dayStartMs(toKey, tz);
+  if (dateKey(new Date(from), tz) !== fromKey || dateKey(new Date(lastDay), tz) !== toKey) throw new Error("该日期在所选时区不存在");
+  const to = nextDayStartMs(lastDay, tz) - 1;
   return { fromKey, toKey, from: new Date(from).toISOString(), to: new Date(to).toISOString(), timezone: tz };
 }
